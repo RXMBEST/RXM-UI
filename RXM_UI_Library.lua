@@ -25,8 +25,8 @@ local GLOW = "rbxassetid://5028857484"
 local requestFunc = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
 local genv = (getgenv and getgenv()) or _G
 local Library = {
-	Version = "2.0.0",
-	Transparency = 0.2,
+	Version = "2.1.0",
+	Transparency = 0.15,
 	Flags = {},
 	Windows = {},
 	Intros = {},
@@ -1456,24 +1456,6 @@ local function runIntro(cfg, onDone)
 				AutoButtonColor = false,
 				ZIndex = 40,
 			}, stage)
-			local hint = make("TextLabel", {
-				AnchorPoint = Vector2.new(1, 1),
-				Position = UDim2.new(1, -18, 1, -14),
-				Size = UDim2.fromOffset(160, 16),
-				BackgroundTransparency = 1,
-				Text = isTouch and "tap to skip" or "click to skip",
-				Font = Enum.Font.GothamMedium,
-				TextSize = 10,
-				TextColor3 = C.Text,
-				TextTransparency = 1,
-				TextXAlignment = Enum.TextXAlignment.Right,
-				ZIndex = 41,
-			}, stage)
-			task.delay(1.2, function()
-				if hint.Parent then
-					tween(hint, 0.6, {TextTransparency = 0.65}, ES.Quad)
-				end
-			end)
 			hit.MouseButton1Click:Connect(skip)
 		end
 		local function step(dt)
@@ -2505,8 +2487,20 @@ end
 function Window:_build(opts)
 	local W = self
 	local IDLE_H = 36
-	local idleW = math.clamp(tonumber(W.IslandWidth) or 142, 90, 420)
-	W.IslandWidth = idleW
+	local baseW = math.clamp(tonumber(W.IslandWidth) or 142, 90, 420)
+	W.IslandWidth = baseW
+	local function fitIslandWidth()
+		local ok, size = pcall(function()
+			return TextService:GetTextSize(tostring(W.Name), 12, Enum.Font.GothamBold, Vector2.new(2000, 20))
+		end)
+		if not ok or typeof(size) ~= "Vector2" then
+			return baseW
+		end
+		local need = math.ceil(size.X) + 72
+		local cap = math.max(baseW, viewportSize().X - 40)
+		return math.clamp(math.max(baseW, need), baseW, cap)
+	end
+	local idleW = fitIslandWidth()
 	local NOTIFY_H = 64
 	local function notifyWidth()
 		return math.max(300, idleW + 40)
@@ -3203,13 +3197,8 @@ function Window:_build(opts)
 	function W:IsOpen()
 		return state == "expanded"
 	end
-	function W:SetIslandWidth(width)
-		width = tonumber(width)
-		if not width then
-			return
-		end
-		idleW = math.clamp(width, 90, 420)
-		W.IslandWidth = idleW
+	local function refitIsland()
+		idleW = fitIslandWidth()
 		idleG.frame.Size = UDim2.fromOffset(idleW, IDLE_H)
 		notifyG.frame.Size = UDim2.fromOffset(notifyWidth(), NOTIFY_H)
 		if state ~= "expanded" then
@@ -3217,8 +3206,17 @@ function Window:_build(opts)
 		end
 		applyTargets()
 	end
+	function W:SetIslandWidth(width)
+		width = tonumber(width)
+		if not width then
+			return
+		end
+		baseW = math.clamp(width, 90, 420)
+		W.IslandWidth = baseW
+		refitIsland()
+	end
 	function W:GetIslandWidth()
-		return idleW
+		return baseW
 	end
 	function W:SetScale(scale)
 		self.Scale = math.clamp(scale, 0.6, 1.4)
@@ -3231,6 +3229,7 @@ function Window:_build(opts)
 		self.Name = tostring(text)
 		title.Text = self.Name
 		idleLabel.Text = self.Name
+		refitIsland()
 	end
 	idleHit.MouseEnter:Connect(function()
 		hover = true
@@ -5588,6 +5587,13 @@ function Library:CreateWindow(opts)
 	if typeof(opts.Accent) == "Color3" then
 		self:SetAccent(opts.Accent)
 	end
+	local kcfg = self:_resolveKey(opts)
+	if kcfg then
+		local okKey = self:KeySystem(kcfg)
+		if not okKey then
+			return nil
+		end
+	end
 	local W = setmetatable({}, Window)
 	W.Library = self
 	W.Name = tostring(opts.Name or "RXM HUB")
@@ -5950,6 +5956,18 @@ function Window:CreateSettingsTab(name)
 		end,
 	})
 
+	if Library.KeyValid and Library.KeyInfo then
+		tab:Section("Key", "key")
+		tab:Label("Key: " .. Library:GetMaskedKey(), "key")
+		tab:Label("Status: " .. Library:GetKeyStatusText())
+		tab:Button({
+			Name = "Remove Saved Key",
+			Callback = function()
+				Library:ClearSavedKey()
+				W:Notify({Title = "Key", Content = "Saved key removed. You will be asked again next execute.", Type = "info"})
+			end,
+		})
+	end
 	tab:Section("UI", "trash")
 	local confirmAt = -10
 	local destroyBtn
@@ -5972,7 +5990,1173 @@ function Window:CreateSettingsTab(name)
 	})
 	return tab
 end
+do
+	local KeyTexts = {
+		Title = "KEY SYSTEM",
+		Subtitle = "Enter your key to continue",
+		Placeholder = "Paste your key here",
+		Verify = "Verify Key",
+		Checking = "Checking",
+		Accepted = "Accepted",
+		Locked = "Too many attempts. Try again in %ds",
+		LockedBtn = "Locked",
+		GetKey = "Get Key",
+		Discord = "Discord",
+		Copied = "Copied!",
+		Empty = "Please enter your key first",
+		Invalid = "Invalid key",
+		Expired = "This key has expired",
+		Revoked = "This key has been disabled",
+		WrongDevice = "This key is locked to another device",
+		Offline = "Could not reach the key server",
+		Valid = "Key accepted. Welcome!",
+		Attempts = "Attempts left: %d",
+		LinkCopied = "Link copied to clipboard",
+		NoClipboard = "Clipboard unavailable, link placed in the box",
+		SavedExpired = "Saved key is no longer valid",
+		Kick = "Too many invalid key attempts.",
+	}
+	local KeyDefaults = {
+		Save = true,
+		FileName = "RXM_Key.txt",
+		AutoLogin = true,
+		CaseSensitive = true,
+		MaxAttempts = 5,
+		Lockout = 30,
+		KickOnLock = false,
+		Closable = true,
+		Wait = true,
+		Sounds = true,
+		Icon = "key",
+		CacheTime = 60,
+	}
+	Library.KeyTexts = KeyTexts
+	Library.KeyValid = false
+	Library.KeyEnabled = true
+	Library.KeyInfo = nil
+	Library._keyCancel = {}
+	Library._keyRemote = {}
+	Library._keyFile = nil
+
+	local function keyText(cfg, name)
+		local custom = cfg.Texts
+		if type(custom) == "table" and custom[name] ~= nil then
+			return tostring(custom[name])
+		end
+		return KeyTexts[name] or name
+	end
+	local function trimText(s)
+		return (tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", ""))
+	end
+	local function fireCallback(fn, ...)
+		if type(fn) == "function" then
+			task.spawn(fn, ...)
+		end
+	end
+	local function formatSpan(seconds)
+		seconds = math.max(0, math.floor(seconds))
+		local d = math.floor(seconds / 86400)
+		local h = math.floor((seconds % 86400) / 3600)
+		local m = math.floor((seconds % 3600) / 60)
+		if d > 0 then
+			return d .. "d " .. h .. "h"
+		end
+		if h > 0 then
+			return h .. "h " .. m .. "m"
+		end
+		if m > 0 then
+			return m .. "m"
+		end
+		return "<1m"
+	end
+	local function copyText(text)
+		local fn = setclipboard or toclipboard or set_clipboard or (Clipboard and Clipboard.set)
+		if not fn then
+			return false
+		end
+		return (pcall(fn, text))
+	end
+	local function httpGet(url)
+		if requestFunc then
+			local ok, res = pcall(requestFunc, {Url = url, Method = "GET"})
+			if ok and type(res) == "table" then
+				local code = tonumber(res.StatusCode or res.Status)
+				if res.Success ~= false and (code == nil or (code >= 200 and code < 300)) and type(res.Body) == "string" then
+					return true, res.Body
+				end
+				return false, "HTTP " .. tostring(code)
+			end
+		end
+		local ok, body = pcall(function()
+			return game:HttpGet(url)
+		end)
+		if ok and type(body) == "string" then
+			return true, body
+		end
+		return false, "request failed"
+	end
+
+	function Library:SetKeyConfig(config)
+		self.KeyConfig = type(config) == "table" and config or nil
+	end
+
+	function Library:GetHWID()
+		local ok, id = pcall(function()
+			return svc("RbxAnalyticsService"):GetClientId()
+		end)
+		if ok and id then
+			return tostring(id)
+		end
+		return "unknown"
+	end
+
+	local function normalizeEntry(e)
+		if type(e) == "string" or type(e) == "number" then
+			return {Key = trimText(e)}
+		end
+		if type(e) ~= "table" then
+			return nil
+		end
+		local key = e.Key or e.key or e[1]
+		if key == nil then
+			return nil
+		end
+		local hwid = e.HWID or e.hwid
+		return {
+			Key = trimText(key),
+			Expire = tonumber(e.Expire or e.expire or e.Expires or e.expires),
+			HWID = (type(hwid) == "string" and hwid ~= "") and hwid or nil,
+			Tier = e.Tier or e.tier,
+			Note = e.Note or e.note,
+			Disabled = (e.Active == false or e.active == false or e.Enabled == false or e.enabled == false or e.Disabled == true or e.disabled == true) or nil,
+		}
+	end
+	local function addEntries(list, source)
+		if type(source) ~= "table" then
+			return
+		end
+		for k, v in pairs(source) do
+			local entry
+			if type(k) == "string" then
+				if type(v) == "table" then
+					local t = copy(v)
+					t.Key = k
+					entry = normalizeEntry(t)
+				elseif v then
+					entry = normalizeEntry(k)
+				elseif v == false then
+					entry = normalizeEntry(k)
+					entry.Disabled = true
+				end
+			else
+				entry = normalizeEntry(v)
+			end
+			if entry and entry.Key ~= "" then
+				table.insert(list, entry)
+			end
+		end
+	end
+	local entryCache = setmetatable({}, {__mode = "k"})
+	local function staticEntries(cfg)
+		local cached = entryCache[cfg]
+		if cached then
+			return cached
+		end
+		local list = {}
+		addEntries(list, cfg.Keys)
+		if type(cfg.Key) == "string" then
+			addEntries(list, {cfg.Key})
+		end
+		entryCache[cfg] = list
+		return list
+	end
+	local function parseKeyList(body)
+		local list = {}
+		local okJson, data = pcall(function()
+			return HttpService:JSONDecode(body)
+		end)
+		if okJson and type(data) == "table" then
+			if type(data.keys) == "table" then
+				data = data.keys
+			end
+			addEntries(list, data)
+			return list
+		end
+		for line in string.gmatch(body, "[^\r\n]+") do
+			line = trimText(line)
+			if line ~= "" and not line:find("^#") and not line:find("^%-%-") then
+				local key, rest = line:match("^(.-)%s*|%s*(.*)$")
+				if key then
+					rest = trimText(rest)
+					table.insert(list, {
+						Key = trimText(key),
+						Expire = tonumber(rest:match("^%d+")),
+						Disabled = string.lower(rest):match("^false") and true or nil,
+					})
+				else
+					table.insert(list, {Key = line})
+				end
+			end
+		end
+		return list
+	end
+	local function remoteEntries(cfg)
+		local cached = Library._keyRemote[cfg.Url]
+		if cached and os.clock() - cached.at < (tonumber(cfg.CacheTime) or 60) then
+			return cached.list
+		end
+		local ok, body = httpGet(cfg.Url)
+		if not ok then
+			return nil, keyText(cfg, "Offline")
+		end
+		local list = parseKeyList(body)
+		Library._keyRemote[cfg.Url] = {at = os.clock(), list = list}
+		return list
+	end
+
+	local function fixFileName(name)
+		name = trimText(name)
+		if name == "" then
+			name = KeyDefaults.FileName
+		end
+		if not name:find("%.") then
+			name = name .. ".txt"
+		end
+		return name
+	end
+	local function flattenKeyOptions(source)
+		if type(source) ~= "table" then
+			return {}
+		end
+		if source._flat then
+			return source
+		end
+		local out = {}
+		for k, v in pairs(source) do
+			out[k] = v
+		end
+		out.KeySettings = nil
+		if type(source.KeySettings) == "table" then
+			for k, v in pairs(source.KeySettings) do
+				out[k] = v
+			end
+		end
+		if out.SaveKey ~= nil then
+			out.Save = out.SaveKey and true or false
+			out.SaveKey = nil
+		end
+		local listKey = out.Key
+		if out.GrabKeyFromSite == true then
+			local url = type(listKey) == "table" and listKey[1] or listKey
+			if type(url) == "string" and trimText(url) ~= "" then
+				out.Url = trimText(url)
+			end
+			out.Key = nil
+		elseif type(listKey) == "table" then
+			local merged = {}
+			if type(out.Keys) == "table" then
+				for k, v in pairs(out.Keys) do
+					if type(k) == "number" then
+						table.insert(merged, v)
+					else
+						merged[k] = v
+					end
+				end
+			end
+			for _, v in ipairs(listKey) do
+				table.insert(merged, v)
+			end
+			out.Keys = merged
+			out.Key = nil
+		end
+		out.GrabKeyFromSite = nil
+		out._flat = true
+		return out
+	end
+	local function buildKeyCfg(lib, options)
+		local cfg = {}
+		for k, v in pairs(KeyDefaults) do
+			cfg[k] = v
+		end
+		for k, v in pairs(flattenKeyOptions(lib.KeyConfig)) do
+			cfg[k] = v
+		end
+		for k, v in pairs(flattenKeyOptions(options)) do
+			cfg[k] = v
+		end
+		cfg.FileName = fixFileName(cfg.FileName)
+		cfg._flat = true
+		return cfg
+	end
+
+	function Library:CheckKey(key, cfg)
+		cfg = flattenKeyOptions(cfg)
+		key = trimText(key)
+		if key == "" then
+			return false, keyText(cfg, "Empty")
+		end
+		local validator = cfg.Validate or cfg.Check
+		if type(validator) == "function" then
+			local ok, res, msg, extra = pcall(validator, key)
+			if not ok then
+				return false, "Validator error: " .. tostring(res), nil, true
+			end
+			if res then
+				local info = {}
+				if type(extra) == "table" then
+					info = copy(extra)
+				elseif type(msg) == "table" then
+					info = copy(msg)
+				end
+				info.Key = key
+				return true, nil, info
+			end
+			return false, type(msg) == "string" and msg or keyText(cfg, "Invalid")
+		end
+		local entries = {}
+		for _, e in ipairs(staticEntries(cfg)) do
+			table.insert(entries, e)
+		end
+		local offline
+		if type(cfg.Url) == "string" and cfg.Url ~= "" then
+			local list, err = remoteEntries(cfg)
+			if list then
+				for _, e in ipairs(list) do
+					table.insert(entries, e)
+				end
+			else
+				offline = err
+			end
+		end
+		local needle = cfg.CaseSensitive == false and string.lower(key) or key
+		for _, e in ipairs(entries) do
+			local hay = cfg.CaseSensitive == false and string.lower(e.Key) or e.Key
+			if hay == needle then
+				if e.Disabled then
+					return false, keyText(cfg, "Revoked")
+				end
+				if e.Expire and e.Expire > 0 and os.time() >= e.Expire then
+					return false, keyText(cfg, "Expired")
+				end
+				if e.HWID and e.HWID ~= self:GetHWID() then
+					return false, keyText(cfg, "WrongDevice")
+				end
+				return true, nil, {Key = e.Key, Expire = e.Expire, Tier = e.Tier, Note = e.Note}
+			end
+		end
+		if offline then
+			return false, offline, nil, true
+		end
+		return false, keyText(cfg, "Invalid")
+	end
+
+	function Library:GetSavedKey(fileName)
+		fileName = fixFileName(fileName or KeyDefaults.FileName)
+		if not (readfile and isfile) then
+			return nil
+		end
+		local okExists, exists = pcall(isfile, fileName)
+		if not (okExists and exists) then
+			return nil
+		end
+		local okRead, raw = pcall(readfile, fileName)
+		if not okRead then
+			return nil
+		end
+		raw = trimText(raw)
+		return raw ~= "" and raw or nil
+	end
+	function Library:ClearSavedKey(fileName)
+		fileName = fixFileName(fileName or self._keyFile or KeyDefaults.FileName)
+		if delfile and isfile then
+			pcall(function()
+				if isfile(fileName) then
+					delfile(fileName)
+				end
+			end)
+		elseif writefile then
+			pcall(writefile, fileName, "")
+		end
+	end
+	function Library:IsKeyValid()
+		return self.KeyEnabled == false or self.KeyValid == true
+	end
+	function Library:GetKey()
+		return self.KeyInfo and self.KeyInfo.Key or nil
+	end
+	function Library:GetKeyInfo()
+		return self.KeyInfo and copy(self.KeyInfo) or nil
+	end
+	function Library:GetMaskedKey()
+		local key = self:GetKey()
+		if not key then
+			return "-"
+		end
+		if #key <= 6 then
+			return string.rep("*", #key)
+		end
+		return string.sub(key, 1, 3) .. string.rep("*", math.min(#key - 6, 10)) .. string.sub(key, -3)
+	end
+	function Library:GetKeyTimeLeft()
+		local info = self.KeyInfo
+		if not info then
+			return nil
+		end
+		if info.Expire and info.Expire > 0 then
+			return math.max(0, info.Expire - os.time())
+		end
+		return math.huge
+	end
+	function Library:GetKeyStatusText()
+		local left = self:GetKeyTimeLeft()
+		if left == nil then
+			return "No key"
+		end
+		if left == math.huge then
+			return "Lifetime"
+		end
+		return formatSpan(left) .. " left"
+	end
+	function Library:ForgetKey()
+		self:ClearSavedKey(self._keyFile)
+		self.KeyValid = false
+		self.KeyInfo = nil
+	end
+
+	local function acceptKey(lib, cfg, info)
+		lib.KeyValid = true
+		lib.KeyInfo = info
+		lib._keyFile = cfg.FileName
+		if cfg.Save and writefile then
+			pcall(writefile, cfg.FileName, info.Key)
+		end
+	end
+
+	function Library:SetKeyEnabled(state)
+		self.KeyEnabled = state and true or false
+	end
+	function Library:IsKeyEnabled()
+		return self.KeyEnabled ~= false
+	end
+	function Library:IsKey(key, options)
+		if self.KeyEnabled == false then
+			return true
+		end
+		local ok = self:CheckKey(key, buildKeyCfg(self, options))
+		return ok == true
+	end
+	function Library:SubmitKey(key, options)
+		if self.KeyEnabled == false then
+			return true
+		end
+		local cfg = buildKeyCfg(self, options)
+		local ok, msg, info = self:CheckKey(key, cfg)
+		if ok then
+			acceptKey(self, cfg, info)
+			return true
+		end
+		return false, msg
+	end
+	function Library:_resolveKey(opts)
+		local switch = opts.KeySystem
+		if switch == nil and opts.Key ~= nil then
+			switch = opts.Key and true or false
+		end
+		if switch == nil then
+			return nil
+		end
+		local source = {}
+		if type(opts.Key) == "table" then
+			for k, v in pairs(opts.Key) do
+				source[k] = v
+			end
+		end
+		if type(opts.KeySettings) == "table" then
+			source.KeySettings = opts.KeySettings
+		end
+		local kcfg = flattenKeyOptions(source)
+		if kcfg.Enabled == false then
+			switch = false
+		end
+		self:SetKeyEnabled(switch)
+		if not switch then
+			return nil
+		end
+		if kcfg.Title == nil then
+			kcfg.Title = tostring(opts.Name or "RXM HUB")
+		end
+		kcfg.Wait = true
+		return kcfg
+	end
+
+	function Library:KeySystem(options)
+		local cfg = buildKeyCfg(self, options)
+		if self.KeyEnabled == false or cfg.Enabled == false then
+			if cfg.Wait == false then
+				fireCallback(cfg.OnSuccess, nil, {})
+				return {
+					Close = function()
+					end,
+				}
+			end
+			return true, {}
+		end
+		if self.KeyValid and not cfg.Force then
+			return true, self.KeyInfo
+		end
+		local prefill, noteText
+		if cfg.Save and cfg.AutoLogin then
+			local saved = self:GetSavedKey(cfg.FileName)
+			if saved then
+				local ok, msg, info, neutral = self:CheckKey(saved, cfg)
+				if ok then
+					acceptKey(self, cfg, info)
+					fireCallback(cfg.OnSuccess, info.Key, info)
+					return true, info
+				end
+				if neutral then
+					prefill, noteText = saved, msg
+				else
+					self:ClearSavedKey(cfg.FileName)
+					noteText = keyText(cfg, "SavedExpired")
+				end
+			end
+		end
+
+		local viewport = viewportSize()
+		local PW = 380
+		if isTouch or viewport.X < 700 then
+			PW = math.clamp(viewport.X - 32, 280, 380)
+		end
+		local hasLink = type(cfg.KeyLink) == "string" and cfg.KeyLink ~= ""
+		local hasDiscord = type(cfg.Discord) == "string" and cfg.Discord ~= ""
+		local panelNote = (type(cfg.Note) == "string" and cfg.Note ~= "") and cfg.Note or nil
+		local NOTE_H = panelNote and 34 or 0
+		local PAD = 20
+		local ICON_Y, TITLE_Y, SUB_Y, NOTE_Y, INPUT_Y = 20, 76, 102, 134, 142 + NOTE_H
+		local STATUS_Y, VERIFY_Y, LINKS_Y = 188 + NOTE_H, 212 + NOTE_H, 258 + NOTE_H
+		local bottomY = (hasLink or hasDiscord) and (LINKS_Y + 34) or (VERIFY_Y + 38)
+		local FOOT_Y = bottomY + 10
+		local PH = FOOT_Y + 14 + 12
+
+		local gui = new("ScreenGui", {
+			Name = "RXMUI_Key",
+			ResetOnSpawn = false,
+			ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+			DisplayOrder = 200,
+			IgnoreGuiInset = true,
+		})
+		if not mountGui(gui) then
+			error("RXM UI: GUI key tidak bisa dipasang (gethui / CoreGui / PlayerGui gagal)", 0)
+		end
+		local click = makeClicker(gui, function()
+			return cfg.Sounds ~= false
+		end)
+
+		local finished, accepted, locked, busy = false, false, false, false
+		local resultOk, resultInfo = false, nil
+		local event = Instance.new("BindableEvent")
+		local attempts = 0
+		local tint = nil
+		local conn
+		local cancelFn
+		local submit
+
+		local dim = new("TextButton", {
+			Name = "Dim",
+			Size = UDim2.fromScale(1, 1),
+			BackgroundColor3 = BLACK,
+			BackgroundTransparency = 1,
+			Text = "",
+			AutoButtonColor = false,
+			ZIndex = 1,
+			Parent = gui,
+		})
+		local shell = new("Frame", {
+			Name = "Shell",
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromOffset(PW, PH),
+			BackgroundTransparency = 1,
+			ZIndex = 2,
+			Parent = gui,
+		})
+		local shellScale = new("UIScale", {Scale = 0.85, Parent = shell})
+		local glow = new("ImageLabel", {
+			Name = "Glow",
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromOffset(PW + 190, PH + 190),
+			BackgroundTransparency = 1,
+			Image = GLOW,
+			ImageColor3 = Theme.Accent,
+			ImageTransparency = 1,
+			ZIndex = 1,
+			Parent = shell,
+		})
+		bindTheme(glow, function(T, f)
+			f.ImageColor3 = tint or T.Accent
+		end)
+		local body = new("CanvasGroup", {
+			Name = "Body",
+			Size = UDim2.fromScale(1, 1),
+			BackgroundColor3 = Theme.Background,
+			BorderSizePixel = 0,
+			GroupTransparency = 1,
+			ZIndex = 2,
+			Active = true,
+			Parent = shell,
+		})
+		corner(body, 22)
+		bindTheme(body, function(T, f)
+			f.BackgroundColor3 = T.Background
+			f.BackgroundTransparency = math.clamp(Library.Transparency, 0, 0.5)
+		end)
+		local borderFrame = new("Frame", {
+			Name = "Border",
+			Size = UDim2.fromScale(1, 1),
+			BackgroundTransparency = 1,
+			ZIndex = 6,
+			Parent = shell,
+		})
+		corner(borderFrame, 22)
+		local borderStroke = stroke(borderFrame, WHITE, 1.6, 1)
+		local borderGrad = new("UIGradient", {
+			Transparency = NumberSequence.new({kp(0, 0), kp(0.3, 0.78), kp(0.7, 0.78), kp(1, 0)}),
+			Parent = borderStroke,
+		})
+		bindTheme(borderFrame, function(T)
+			local a = tint or T.Accent
+			local b = tint and darken(tint, 0.4) or T.Accent2
+			borderGrad.Color = ColorSequence.new({ck(0, a), ck(0.5, b), ck(1, a)})
+		end)
+
+		local badge = new("Frame", {
+			Name = "Badge",
+			AnchorPoint = Vector2.new(0.5, 0),
+			Position = UDim2.new(0.5, 0, 0, ICON_Y),
+			Size = UDim2.fromOffset(48, 48),
+			BackgroundColor3 = Theme.Accent,
+			BackgroundTransparency = 0.86,
+			BorderSizePixel = 0,
+			ZIndex = 3,
+			Parent = body,
+		})
+		round(badge)
+		local badgeStroke = stroke(badge, Theme.Accent, 1.2, 0.55)
+		bindTheme(badge, function(T)
+			if not tint then
+				badge.BackgroundColor3 = T.Accent
+				badgeStroke.Color = T.Accent
+			end
+		end)
+		local badgeIcon = createIcon(cfg.Icon, badge, 24, "Accent", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.5),
+			ZIndex = 4,
+		})
+
+		local title = new("TextLabel", {
+			Position = UDim2.new(0, PAD, 0, TITLE_Y),
+			Size = UDim2.new(1, -PAD * 2, 0, 24),
+			BackgroundTransparency = 1,
+			Text = tostring(cfg.Title or keyText(cfg, "Title")),
+			Font = Enum.Font.GothamBold,
+			TextSize = 18,
+			TextColor3 = Theme.Text,
+			ZIndex = 3,
+			Parent = body,
+		})
+		bindTheme(title, function(T)
+			title.TextColor3 = T.Text
+		end)
+		local subtitle = new("TextLabel", {
+			Position = UDim2.new(0, PAD, 0, SUB_Y),
+			Size = UDim2.new(1, -PAD * 2, 0, 30),
+			BackgroundTransparency = 1,
+			Text = tostring(cfg.Subtitle or keyText(cfg, "Subtitle")),
+			Font = Enum.Font.Gotham,
+			TextSize = 12,
+			TextColor3 = Theme.Muted,
+			TextWrapped = true,
+			TextYAlignment = Enum.TextYAlignment.Top,
+			ZIndex = 3,
+			Parent = body,
+		})
+		bindTheme(subtitle, function(T)
+			subtitle.TextColor3 = T.Muted
+		end)
+		if panelNote then
+			local noteLabel = new("TextLabel", {
+				Position = UDim2.new(0, PAD, 0, NOTE_Y),
+				Size = UDim2.new(1, -PAD * 2, 0, 30),
+				BackgroundTransparency = 1,
+				Text = panelNote,
+				Font = Enum.Font.Gotham,
+				TextSize = 11,
+				TextColor3 = Theme.Muted,
+				TextTransparency = 0.25,
+				TextWrapped = true,
+				TextYAlignment = Enum.TextYAlignment.Top,
+				ZIndex = 3,
+				Parent = body,
+			})
+			bindTheme(noteLabel, function(T)
+				noteLabel.TextColor3 = T.Muted
+			end)
+		end
+
+		local inputBox = new("Frame", {
+			Name = "Input",
+			Position = UDim2.new(0, PAD, 0, INPUT_Y),
+			Size = UDim2.new(1, -PAD * 2, 0, 40),
+			BackgroundColor3 = Theme.Input,
+			BorderSizePixel = 0,
+			ZIndex = 3,
+			Parent = body,
+		})
+		corner(inputBox, 12)
+		local inputStroke = stroke(inputBox, Theme.Stroke, 1)
+		bindTheme(inputBox, function(T)
+			inputBox.BackgroundColor3 = T.Input
+		end)
+		createIcon("lock", inputBox, 16, "Muted", {
+			AnchorPoint = Vector2.new(0, 0.5),
+			Position = UDim2.new(0, 12, 0.5, 0),
+			ZIndex = 4,
+		})
+		local box = new("TextBox", {
+			Position = UDim2.new(0, 38, 0, 0),
+			Size = UDim2.new(1, -48, 1, 0),
+			BackgroundTransparency = 1,
+			Text = prefill or "",
+			PlaceholderText = tostring(cfg.Placeholder or keyText(cfg, "Placeholder")),
+			PlaceholderColor3 = Theme.Muted,
+			Font = Enum.Font.GothamMedium,
+			TextSize = 13,
+			TextColor3 = Theme.Text,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ClearTextOnFocus = false,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			ZIndex = 5,
+			Parent = inputBox,
+		})
+		bindTheme(box, function(T)
+			box.TextColor3 = T.Text
+			box.PlaceholderColor3 = T.Muted
+		end)
+		local underline = new("Frame", {
+			AnchorPoint = Vector2.new(0.5, 1),
+			Position = UDim2.new(0.5, 0, 1, 0),
+			Size = UDim2.new(0, 0, 0, 2),
+			BackgroundColor3 = Theme.Accent,
+			BorderSizePixel = 0,
+			ZIndex = 6,
+			Parent = inputBox,
+		})
+		round(underline)
+		bindTheme(underline, function(T)
+			underline.BackgroundColor3 = T.Accent
+		end)
+
+		local status = new("TextLabel", {
+			Position = UDim2.new(0, PAD, 0, STATUS_Y),
+			Size = UDim2.new(1, -PAD * 2, 0, 16),
+			BackgroundTransparency = 1,
+			Text = noteText or "",
+			Font = Enum.Font.Gotham,
+			TextSize = 11,
+			TextColor3 = noteText and kindColor("warn") or Theme.Muted,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			ZIndex = 3,
+			Parent = body,
+		})
+		local function setStatus(text, kind, quiet)
+			status.Text = text
+			if kind == nil or kind == "info" then
+				status.TextColor3 = Theme.Muted
+			else
+				status.TextColor3 = kindColor(kind)
+			end
+			if not quiet then
+				status.TextTransparency = 1
+				tween(status, 0.25, {TextTransparency = 0}, ES.Quad)
+			end
+		end
+
+		local function decorate(btn, rest, hover)
+			local sc = new("UIScale", {Scale = 1, Parent = btn})
+			btn.MouseEnter:Connect(function()
+				if accepted then
+					return
+				end
+				tween(btn, 0.15, {BackgroundColor3 = hover()}, ES.Quad)
+			end)
+			btn.MouseLeave:Connect(function()
+				tween(sc, 0.15, {Scale = 1}, ES.Quad)
+				if accepted then
+					return
+				end
+				tween(btn, 0.2, {BackgroundColor3 = rest()}, ES.Quad)
+			end)
+			btn.MouseButton1Down:Connect(function()
+				tween(sc, 0.08, {Scale = 0.97}, ES.Quad)
+			end)
+			btn.MouseButton1Up:Connect(function()
+				tween(sc, 0.25, {Scale = 1}, ES.Back, ED.Out)
+			end)
+		end
+		local function accentRest()
+			return Theme.Accent
+		end
+		local function accentHover()
+			return lighten(Theme.Accent, 0.18)
+		end
+		local function plainRest()
+			return Theme.Button
+		end
+		local function plainHover()
+			return Theme.CardHover
+		end
+		local verifyBtn = new("TextButton", {
+			Name = "Verify",
+			Position = UDim2.new(0, PAD, 0, VERIFY_Y),
+			Size = UDim2.new(1, -PAD * 2, 0, 38),
+			BackgroundColor3 = Theme.Accent,
+			AutoButtonColor = false,
+			Text = keyText(cfg, "Verify"),
+			Font = Enum.Font.GothamBold,
+			TextSize = 13,
+			TextColor3 = onColor(Theme.Accent),
+			ZIndex = 4,
+			Parent = body,
+		})
+		corner(verifyBtn, 12)
+		decorate(verifyBtn, accentRest, accentHover)
+		bindTheme(verifyBtn, function(T)
+			if not accepted then
+				verifyBtn.BackgroundColor3 = T.Accent
+				verifyBtn.TextColor3 = onColor(T.Accent)
+			end
+		end)
+
+		local function plainButton(parent, text, pos, size)
+			local btn = new("TextButton", {
+				Position = pos,
+				Size = size,
+				BackgroundColor3 = Theme.Button,
+				AutoButtonColor = false,
+				Text = text,
+				Font = Enum.Font.GothamMedium,
+				TextSize = 12,
+				TextColor3 = Theme.Text,
+				ZIndex = 4,
+				Parent = parent,
+			})
+			corner(btn, 12)
+			stroke(btn, Theme.Stroke, 1)
+			decorate(btn, plainRest, plainHover)
+			bindTheme(btn, function(T)
+				btn.BackgroundColor3 = T.Button
+				btn.TextColor3 = T.Text
+			end)
+			return btn
+		end
+		local function linkAction(btn, link, label)
+			click(1, 0.8)
+			if copyText(link) then
+				btn.Text = keyText(cfg, "Copied")
+				setStatus(keyText(cfg, "LinkCopied"), "success")
+				task.delay(1.6, function()
+					if btn.Parent then
+						btn.Text = label
+					end
+				end)
+			else
+				box.Text = link
+				setStatus(keyText(cfg, "NoClipboard"), "warn")
+			end
+		end
+		if hasLink or hasDiscord then
+			local row = new("Frame", {
+				Position = UDim2.new(0, PAD, 0, LINKS_Y),
+				Size = UDim2.new(1, -PAD * 2, 0, 34),
+				BackgroundTransparency = 1,
+				ZIndex = 3,
+				Parent = body,
+			})
+			local both = hasLink and hasDiscord
+			if hasLink then
+				local label = keyText(cfg, "GetKey")
+				local btn = plainButton(row, label, UDim2.new(0, 0, 0, 0), both and UDim2.new(0.5, -4, 1, 0) or UDim2.fromScale(1, 1))
+				btn.MouseButton1Click:Connect(function()
+					linkAction(btn, cfg.KeyLink, label)
+				end)
+			end
+			if hasDiscord then
+				local label = keyText(cfg, "Discord")
+				local btn = plainButton(row, label, both and UDim2.new(0.5, 4, 0, 0) or UDim2.new(0, 0, 0, 0), both and UDim2.new(0.5, -4, 1, 0) or UDim2.fromScale(1, 1))
+				btn.MouseButton1Click:Connect(function()
+					linkAction(btn, cfg.Discord, label)
+				end)
+			end
+		end
+		local footer = new("TextLabel", {
+			Position = UDim2.new(0, PAD, 0, FOOT_Y),
+			Size = UDim2.new(1, -PAD * 2, 0, 14),
+			BackgroundTransparency = 1,
+			Text = tostring(cfg.Footer or ("RXM UI v" .. Library.Version)),
+			Font = Enum.Font.Gotham,
+			TextSize = 10,
+			TextColor3 = Theme.Muted,
+			TextTransparency = 0.4,
+			ZIndex = 3,
+			Parent = body,
+		})
+		bindTheme(footer, function(T)
+			footer.TextColor3 = T.Muted
+		end)
+
+		local function closeUI(instant)
+			if conn then
+				conn:Disconnect()
+				conn = nil
+			end
+			Library._keyCancel[cancelFn] = nil
+			local function destroy()
+				pcall(function()
+					gui:Destroy()
+				end)
+			end
+			if instant then
+				destroy()
+				return
+			end
+			tween(shellScale, 0.3, {Scale = 0.9}, ES.Quad, ED.In)
+			tween(body, 0.25, {GroupTransparency = 1}, ES.Quad, ED.In)
+			tween(dim, 0.3, {BackgroundTransparency = 1}, ES.Quad)
+			tween(borderStroke, 0.25, {Transparency = 1}, ES.Quad)
+			tween(glow, 0.25, {ImageTransparency = 1}, ES.Quad)
+			task.delay(0.4, destroy)
+		end
+		local function finish(ok, info, instant)
+			if finished then
+				return
+			end
+			finished = true
+			resultOk, resultInfo = ok, info
+			closeUI(instant)
+			if ok then
+				fireCallback(cfg.OnSuccess, info.Key, info)
+			else
+				fireCallback(cfg.OnClose)
+			end
+			event:Fire()
+		end
+		cancelFn = function()
+			finish(false, nil, true)
+		end
+		Library._keyCancel[cancelFn] = true
+
+		local function setTint(color)
+			tint = color
+			badge.BackgroundColor3 = color
+			badgeStroke.Color = color
+			badgeIcon:TweenColor(color, 0.3)
+			borderGrad.Color = ColorSequence.new({ck(0, color), ck(0.5, darken(color, 0.4)), ck(1, color)})
+			glow.ImageColor3 = color
+		end
+		local function shake()
+			task.spawn(function()
+				for _, dx in ipairs({9, -9, 6, -6, 3, 0}) do
+					if finished then
+						return
+					end
+					tween(shell, 0.05, {Position = UDim2.new(0.5, dx, 0.5, 0)}, ES.Quad)
+					task.wait(0.05)
+				end
+			end)
+			tween(inputStroke, 0.1, {Color = kindColor("error")}, ES.Quad)
+			task.delay(0.9, function()
+				if not finished and inputStroke.Parent then
+					tween(inputStroke, 0.35, {Color = Theme.Stroke}, ES.Quad)
+				end
+			end)
+		end
+		local function startLock()
+			if cfg.KickOnLock then
+				pcall(function()
+					LocalPlayer:Kick(keyText(cfg, "Kick"))
+				end)
+			end
+			local seconds = math.floor(tonumber(cfg.Lockout) or 0)
+			if seconds <= 0 then
+				attempts = 0
+				setStatus(keyText(cfg, "Invalid"), "error")
+				return
+			end
+			locked = true
+			box.TextEditable = false
+			verifyBtn.Text = keyText(cfg, "LockedBtn")
+			tween(verifyBtn, 0.2, {BackgroundTransparency = 0.6}, ES.Quad)
+			task.spawn(function()
+				for s = seconds, 1, -1 do
+					if finished then
+						return
+					end
+					setStatus(string.format(keyText(cfg, "Locked"), s), "error", true)
+					task.wait(1)
+				end
+				if finished then
+					return
+				end
+				locked = false
+				attempts = 0
+				box.TextEditable = true
+				verifyBtn.Text = keyText(cfg, "Verify")
+				tween(verifyBtn, 0.2, {BackgroundTransparency = 0}, ES.Quad)
+				setStatus("", "info")
+			end)
+		end
+		submit = function()
+			if finished or accepted or busy or locked then
+				return
+			end
+			local key = trimText(box.Text)
+			click(1.05, 0.8)
+			if key == "" then
+				setStatus(keyText(cfg, "Empty"), "warn")
+				shake()
+				return
+			end
+			busy = true
+			local checking = true
+			task.spawn(function()
+				local dots = 0
+				while checking and not finished do
+					dots = dots % 3 + 1
+					verifyBtn.Text = keyText(cfg, "Checking") .. string.rep(".", dots)
+					task.wait(0.3)
+				end
+			end)
+			task.spawn(function()
+				local ok, msg, info, neutral = Library:CheckKey(key, cfg)
+				checking = false
+				busy = false
+				if finished then
+					return
+				end
+				if ok then
+					accepted = true
+					acceptKey(Library, cfg, info)
+					local good = kindColor("success")
+					setTint(good)
+					badgeIcon:SetIcon("unlock")
+					verifyBtn.Text = keyText(cfg, "Accepted")
+					tween(verifyBtn, 0.25, {BackgroundColor3 = good, TextColor3 = onColor(good)}, ES.Quad)
+					setStatus(keyText(cfg, "Valid"), "success")
+					click(0.9, 1)
+					task.delay(0.8, function()
+						finish(true, info)
+					end)
+					return
+				end
+				verifyBtn.Text = keyText(cfg, "Verify")
+				if neutral then
+					setStatus(msg, "warn")
+					return
+				end
+				attempts = attempts + 1
+				shake()
+				local limit = tonumber(cfg.MaxAttempts) or 0
+				if limit > 0 and attempts >= limit then
+					setStatus(msg, "error")
+					startLock()
+				elseif limit > 0 then
+					setStatus(msg .. "  -  " .. string.format(keyText(cfg, "Attempts"), limit - attempts), "error")
+				else
+					setStatus(msg, "error")
+				end
+			end)
+		end
+		verifyBtn.MouseButton1Click:Connect(submit)
+		box.Focused:Connect(function()
+			click(1.05, 0.6)
+			tween(inputStroke, 0.25, {Color = Theme.Accent}, ES.Quad)
+			tween(underline, 0.4, {Size = UDim2.new(1, -24, 0, 2)}, ES.Quint, ED.Out)
+		end)
+		box.FocusLost:Connect(function(enter)
+			tween(inputStroke, 0.35, {Color = Theme.Stroke}, ES.Quad)
+			tween(underline, 0.3, {Size = UDim2.new(0, 0, 0, 2)}, ES.Quad, ED.In)
+			if enter then
+				submit()
+			end
+		end)
+		if cfg.Closable then
+			local closeBtn = new("TextButton", {
+				Name = "Close",
+				AnchorPoint = Vector2.new(1, 0),
+				Position = UDim2.new(1, -10, 0, 10),
+				Size = UDim2.fromOffset(28, 28),
+				BackgroundTransparency = 1,
+				Text = "",
+				AutoButtonColor = false,
+				ZIndex = 7,
+				Parent = body,
+			})
+			local xIcon = createIcon("x", closeBtn, 14, "Muted", {
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				Position = UDim2.fromScale(0.5, 0.5),
+			})
+			closeBtn.MouseEnter:Connect(function()
+				xIcon:TweenColor(kindColor("error"), 0.15)
+			end)
+			closeBtn.MouseLeave:Connect(function()
+				xIcon:SetColor("Muted")
+			end)
+			closeBtn.MouseButton1Click:Connect(function()
+				if accepted then
+					return
+				end
+				click(0.95, 0.8)
+				finish(false, nil)
+			end)
+		end
+
+		local clock = 0
+		conn = RunService.Heartbeat:Connect(function(dt)
+			clock = clock + dt
+			borderGrad.Rotation = (borderGrad.Rotation + 70 * dt) % 360
+			if not accepted then
+				badgeStroke.Transparency = 0.55 + 0.2 * math.sin(clock * 2.4)
+			end
+		end)
+		tween(dim, 0.35, {BackgroundTransparency = 0.45}, ES.Quad)
+		tween(body, 0.4, {GroupTransparency = 0}, ES.Quad)
+		tween(shellScale, 0.55, {Scale = 1}, ES.Back, ED.Out)
+		tween(borderStroke, 0.4, {Transparency = 0.2}, ES.Quad)
+		tween(glow, 0.6, {ImageTransparency = 0.8}, ES.Quad)
+
+		if cfg.Wait == false then
+			return {
+				Gui = gui,
+				Close = function()
+					finish(false, nil)
+				end,
+			}
+		end
+		if not finished then
+			event.Event:Wait()
+		end
+		return resultOk, resultInfo
+	end
+	Library.CreateKeySystem = Library.KeySystem
+end
 function Library:Unload()
+	for cancel in pairs(self._keyCancel or {}) do
+		pcall(cancel)
+	end
+	self._keyCancel = {}
 	for i = #self.Windows, 1, -1 do
 		local W = self.Windows[i]
 		pcall(function()
