@@ -1,4 +1,4 @@
--- RXM UI OPEN SOURCE --
+-- RXM UI SOURCE
 local function svc(name)
 	local service = game:GetService(name)
 	if cloneref then
@@ -3706,7 +3706,7 @@ function Window:_build(opts)
 		end
 	end
 	local function moveHighlight(index, instant)
-		local n = math.max(#tabs, 1)
+		local n = math.max(TP.count or #tabs, 1)
 		if instant then
 			hlToken = hlToken + 1
 		end
@@ -3758,17 +3758,29 @@ function Window:_build(opts)
 		end)
 	end
 	local function layoutTabs()
-		local n = #tabs
+		local n = 0
+		for _, t in ipairs(tabs) do
+			if t.Hidden then
+				t.vi = nil
+			else
+				n = n + 1
+				t.vi = n
+			end
+		end
+		TP.count = n
+		local cnt = math.max(n, 1)
 		local vertical = TP.vertical
-		local h = TP.itemSize(n)
-		local avail = vertical and TP.side or (PW - 24) / math.max(n, 1)
-		for i, tab in ipairs(tabs) do
+		local h = TP.itemSize(cnt)
+		local avail = vertical and TP.side or (PW - 24) / cnt
+		for _, tab in ipairs(tabs) do
+			tab.button.Visible = tab.vi ~= nil
+			local i = tab.vi or 1
 			if vertical then
 				tab.button.Position = UDim2.new(0, 0, 0, 4 + (i - 1) * h)
 				tab.button.Size = UDim2.new(1, 0, 0, h)
 			else
-				tab.button.Position = UDim2.new((i - 1) / n, 0, 0, 0)
-				tab.button.Size = UDim2.new(1 / n, 0, 1, 0)
+				tab.button.Position = UDim2.new((i - 1) / cnt, 0, 0, 0)
+				tab.button.Size = UDim2.new(1 / cnt, 0, 1, 0)
 			end
 			if tab.icon then
 				-- the label stays centered in the button; the icon only shows when it fits beside it
@@ -3783,9 +3795,15 @@ function Window:_build(opts)
 			end
 		end
 		if currentTab then
-			moveHighlight(currentTab.index, true)
+			if currentTab.vi then
+				highlight.Visible = true
+				moveHighlight(currentTab.vi, true)
+			else
+				highlight.Visible = false
+			end
 		end
 	end
+	W._relayoutTabs = layoutTabs
 	local SLIDE_T = 0.42
 	local function slideOut(tab, dir)
 		tab.slideTok = tab.slideTok + 1
@@ -3833,7 +3851,12 @@ function Window:_build(opts)
 			slideOut(old, dir)
 		end
 		paintTab(tab, Theme.Text, 0.3)
-		moveHighlight(tab.index, old == nil)
+		if tab.vi then
+			highlight.Visible = true
+			moveHighlight(tab.vi, old == nil or old.vi == nil)
+		else
+			highlight.Visible = false
+		end
 		slideIn(tab, dir)
 		if W._onTabChanged then
 			W._onTabChanged(tab)
@@ -6794,6 +6817,7 @@ function Window:CreateSettingsTab(name, hide)
 		Config = true,
 		Key = true,
 		DestroyUI = true,
+		TabButton = true,
 	}
 	if type(hide) == "table" then
 		for k, v in pairs(hide) do
@@ -6804,6 +6828,12 @@ function Window:CreateSettingsTab(name, hide)
 	end
 	local tab = W:AddTab(name or "Settings", "settings")
 	W.SettingsTab = tab
+	if H.TabButton then
+		tab.Hidden = true
+		if W._relayoutTabs then
+			W._relayoutTabs()
+		end
+	end
 	local uiColor, introColor, introText, introSub, introImage, introSound, introDuration, introStyle, introPick
 	if not (H.UIColor and H.Preset and H.UIScale and H.UITransparency and H.IslandWidth and H.ToggleKey and H.TabPosition) then
 		tab:Section("Appearance")
