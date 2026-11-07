@@ -1,5 +1,6 @@
 local function svc(name)
-	local service = game
+	local service = game:GetService(name)
+	if cloneref then
 		local ok, cloned = pcall(cloneref, service)
 		if ok and cloned then
 			return cloned
@@ -25,7 +26,7 @@ local requestFunc = (syn and syn.request) or (http and http.request) or http_req
 local genv = (getgenv and getgenv()) or _G
 local Library = {
 	Version = "2.1.0",
-	Transparency = 0.15,
+	Transparency = 0.2,
 	Flags = {},
 	Windows = {},
 	Intros = {},
@@ -4343,6 +4344,15 @@ function Tab:Slider(o)
 			tween(knobStroke, 0.3, {Transparency = 0.6}, ES.Quad)
 		end
 	end
+	local pending = nil
+	local function beginDrag(x)
+		dragging = true
+		W.Click(1.1, 0.6)
+		self.scroll.ScrollingEnabled = false
+		tween(knobScale, 0.2, {Scale = 1.4}, ES.Back, ED.Out)
+		tween(knobStroke, 0.2, {Transparency = 0.25}, ES.Quad)
+		updateFromX(x)
+	end
 	c.hit.InputBegan:Connect(function(input)
 		if not isPress(input) then
 			return
@@ -4350,22 +4360,38 @@ function Tab:Slider(o)
 		local s = math.max(W._shellScale.Scale, 0.01)
 		local y = input.Position.Y
 		local ty = track.AbsolutePosition.Y
-		if y >= ty - 20 * s and y <= ty + track.AbsoluteSize.Y + 12 * s then
-			dragging = true
-			W.Click(1.1, 0.6)
-			self.scroll.ScrollingEnabled = false
-			tween(knobScale, 0.2, {Scale = 1.4}, ES.Back, ED.Out)
-			tween(knobStroke, 0.2, {Transparency = 0.25}, ES.Quad)
-			updateFromX(input.Position.X)
+		if y >= ty - 16 * s and y <= ty + track.AbsoluteSize.Y + 12 * s then
+			if input.UserInputType == Enum.UserInputType.Touch then
+				pending = {x = input.Position.X, y = input.Position.Y}
+			else
+				beginDrag(input.Position.X)
+			end
 		end
 	end)
 	W:_connect(UserInputService.InputChanged, function(input)
-		if dragging and isMove(input) then
+		if not isMove(input) then
+			return
+		end
+		if dragging then
 			updateFromX(input.Position.X)
+		elseif pending then
+			local dx = math.abs(input.Position.X - pending.x)
+			local dy = math.abs(input.Position.Y - pending.y)
+			if dx > 6 or dy > 6 then
+				pending = nil
+				if dx > dy * 1.5 then
+					beginDrag(input.Position.X)
+				end
+			end
 		end
 	end)
 	W:_connect(UserInputService.InputEnded, function(input)
 		if isPress(input) then
+			if pending then
+				local p = pending
+				pending = nil
+				updateFromX(p.x)
+			end
 			endDrag()
 		end
 	end)
@@ -5708,254 +5734,307 @@ local function sortedKeys(t)
 	table.sort(out)
 	return out
 end
-function Window:CreateSettingsTab(name)
+function Window:CreateSettingsTab(name, hide)
 	local W = self
-	local tab = W:AddTab(name or "Settings")
-	tab:Section("Appearance")
-	local uiColor = tab:ColorPicker({
-		Name = "UI Color",
-		Default = Theme.Accent,
-		Callback = function(color)
-			Library:SetAccent(color)
-		end,
-	})
-	local presetNames = {"Custom"}
-	for _, n in ipairs(sortedKeys(Library.Presets)) do
-		table.insert(presetNames, n)
+	if type(name) == "table" then
+		hide = name
+		name = nil
 	end
-	tab:Dropdown({
-		Name = "Preset",
-		Options = presetNames,
-		Default = "Custom",
-		Callback = function(preset)
-			if preset ~= "Custom" and Library:SetPreset(preset) then
-				uiColor:Set(Library.Presets[preset], true)
-			end
-		end,
-	})
-	tab:Slider({
-		Name = "UI Scale",
-		Min = 0.6,
-		Max = 1.3,
-		Step = 0.05,
-		Default = W.Scale,
-		Callback = function(value)
-			W:SetScale(value)
-		end,
-	})
-	tab:Slider({
-		Name = "UI Transparency",
-		Min = 0,
-		Max = 0.8,
-		Step = 0.05,
-		Default = Library.Transparency,
-		Callback = function(value)
-			Library:SetTransparency(value)
-		end,
-	})
-	tab:Slider({
-		Name = "Island Width",
-		Min = 90,
-		Max = 420,
-		Step = 2,
-		Suffix = " px",
-		Default = W:GetIslandWidth(),
-		Callback = function(value)
-			W:SetIslandWidth(value)
-		end,
-	})
-	tab:Keybind({
-		Name = "Hide / Show UI",
-		Default = W.ToggleKey,
-		Changed = function(key)
-			W:SetToggleKey(key)
-		end,
-	})
-	tab:Section("Font")
-	tab:FontPicker({
-		Name = "UI Font",
-		Default = Library.FontName,
-		Callback = function(name)
-			Library:SetFont(name)
-		end,
-	})
-	tab:Section("Icons")
-	tab:IconPicker({
-		Name = "UI Icon",
-		Default = W.Icon or "",
-		Callback = function(name)
-			W:SetIcon(name ~= "" and name or nil)
-		end,
-	})
-	tab:Section("Effects")
-	local fxNames = {
-		{"Border", "Animated Border"},
-		{"Glow", "Glow"},
-		{"Neon", "Neon Line"},
-		{"Shimmer", "Title Shimmer"},
-		{"Embers", "Embers"},
-		{"Aurora", "Aurora"},
-		{"Sounds", "Click Sounds"},
+	local H = {
+		UIColor = true,
+		Preset = true,
+		UIScale = true,
+		UITransparency = true,
+		IslandWidth = true,
+		ToggleKey = true,
+		Font = true,
+		Icon = true,
+		Effects = false,
+		Intro = true,
+		Config = true,
+		Key = true,
+		DestroyUI = false,
 	}
-	for _, entry in ipairs(fxNames) do
-		tab:Toggle({
-			Name = entry[2],
-			Default = W.FX[entry[1]],
-			Callback = function(on)
-				W:SetEffect(entry[1], on)
+	if type(hide) == "table" then
+		for k, v in pairs(hide) do
+			if H[k] ~= nil then
+				H[k] = v and true or false
+			end
+		end
+	end
+	local tab = W:AddTab(name or "Settings")
+	local uiColor, introColor, introText, introSub, introImage, introSound, introDuration, introStyle, introPick
+	if not (H.UIColor and H.Preset and H.UIScale and H.UITransparency and H.IslandWidth and H.ToggleKey) then
+		tab:Section("Appearance")
+	end
+	if not H.UIColor then
+		uiColor = tab:ColorPicker({
+			Name = "UI Color",
+			Default = Theme.Accent,
+			Callback = function(color)
+				Library:SetAccent(color)
 			end,
 		})
 	end
-	tab:Slider({
-		Name = "Border Speed",
-		Min = 10,
-		Max = 300,
-		Step = 5,
-		Default = W.BorderSpeed,
-		Callback = function(value)
-			W.BorderSpeed = value
-		end,
-	})
-	tab:Section("Intro")
-	tab:Toggle({
-		Name = "Loading Screen (next execute)",
-		Default = Library.IntroEnabled,
-		Callback = function(on)
-			Library:SetIntroEnabled(on)
-		end,
-	})
-	local cfg = Library:GetIntroConfig()
-	local introColor, introText, introSub, introImage, introSound, introDuration, introStyle, introPick
-	introPick = tab:Dropdown({
-		Name = "Intro",
-		Options = sortedKeys(Library.Intros),
-		Default = Library.ActiveIntro,
-		Callback = function(pick)
-			Library:SetIntro(pick)
-			local now = Library:GetIntroConfig()
-			introText:Set(now.Text, true)
-			introSub:Set(now.Subtitle, true)
-			introImage:Set(now.Image and tostring(now.Image) or "", true)
-			introSound:Set(now.Sound and tostring(now.Sound) or "", true)
-			introDuration:Set(now.Duration, true)
-			introColor:Set(now.ResolvedColors.Primary, true)
-		end,
-	})
-	introStyle = tab:Dropdown({
-		Name = "Intro Style",
-		Options = sortedKeys(Library.IntroStyles),
-		Default = type(cfg.Style) == "string" and cfg.Style or "Emblem",
-		Callback = function(style)
-			Library:SetIntroStyle(style)
-		end,
-	})
-	introText = tab:Input({
-		Name = "Intro Text",
-		Default = cfg.Text,
-		Placeholder = "title",
-		Callback = function(text)
-			Library:SetIntro({Text = text})
-		end,
-	})
-	introSub = tab:Input({
-		Name = "Intro Subtitle",
-		Default = cfg.Subtitle,
-		Placeholder = "subtitle",
-		Callback = function(text)
-			Library:SetIntro({Subtitle = text})
-		end,
-	})
-	introImage = tab:Input({
-		Name = "Intro Image",
-		Default = cfg.Image and tostring(cfg.Image) or "",
-		Placeholder = "id / link / file",
-		Callback = function(text)
-			Library:SetIntroImage(text ~= "" and text or nil)
-		end,
-	})
-	introSound = tab:Input({
-		Name = "Intro Sound",
-		Default = cfg.Sound and tostring(cfg.Sound) or "",
-		Placeholder = "sound id",
-		Callback = function(text)
-			Library:SetIntroSound(text ~= "" and text or nil)
-		end,
-	})
-	introDuration = tab:Slider({
-		Name = "Intro Duration",
-		Min = 2,
-		Max = 12,
-		Step = 0.5,
-		Suffix = "s",
-		Default = cfg.Duration,
-		Callback = function(value)
-			Library:SetIntroDuration(value)
-		end,
-	})
-	introColor = tab:ColorPicker({
-		Name = "Intro Color",
-		Default = cfg.ResolvedColors.Primary,
-		Callback = function(color)
-			Library:SetIntroColor(color)
-		end,
-	})
-	tab:IconPicker({
-		Name = "Intro Icon",
-		Default = cfg.Icon or "",
-		Callback = function(name)
-			Library:SetIntro({Icon = name ~= "" and name or false})
-		end,
-	})
-	tab:Button({
-		Name = "Intro Color = follow UI Color",
-		Callback = function()
-			Library:SetIntroColor(nil)
-			introColor:Set(Theme.Accent, true)
-			W:Notify({Title = "Intro color", Content = "Now follows the UI color", Type = "info"})
-		end,
-	})
-	tab:Button({
-		Name = "Preview Intro",
-		Solid = true,
-		Callback = function()
-			Library:PlayIntro()
-		end,
-	})
-	tab:Section("Config")
-	tab:Button({
-		Name = "Save Config",
-		Callback = function()
-			local ok, err = Library:SaveConfig(W.ConfigFile)
-			W:Notify({
-				Title = ok and "Config saved" or "Save failed",
-				Content = ok and W.ConfigFile or tostring(err),
-				Type = ok and "success" or "error",
+	if not H.Preset then
+		local presetNames = {"Custom"}
+		for _, n in ipairs(sortedKeys(Library.Presets)) do
+			table.insert(presetNames, n)
+		end
+		tab:Dropdown({
+			Name = "Preset",
+			Options = presetNames,
+			Default = "Custom",
+			Callback = function(preset)
+				if preset ~= "Custom" and Library:SetPreset(preset) and uiColor then
+					uiColor:Set(Library.Presets[preset], true)
+				end
+			end,
+		})
+	end
+	if not H.UIScale then
+		tab:Slider({
+			Name = "UI Scale",
+			Min = 0.6,
+			Max = 1.3,
+			Step = 0.05,
+			Default = W.Scale,
+			Callback = function(value)
+				W:SetScale(value)
+			end,
+		})
+	end
+	if not H.UITransparency then
+		tab:Slider({
+			Name = "UI Transparency",
+			Min = 0,
+			Max = 0.8,
+			Step = 0.05,
+			Default = Library.Transparency,
+			Callback = function(value)
+				Library:SetTransparency(value)
+			end,
+		})
+	end
+	if not H.IslandWidth then
+		tab:Slider({
+			Name = "Island Width",
+			Min = 90,
+			Max = 420,
+			Step = 2,
+			Suffix = " px",
+			Default = W:GetIslandWidth(),
+			Callback = function(value)
+				W:SetIslandWidth(value)
+			end,
+		})
+	end
+	if not H.ToggleKey then
+		tab:Keybind({
+			Name = "Hide / Show UI",
+			Default = W.ToggleKey,
+			Changed = function(key)
+				W:SetToggleKey(key)
+			end,
+		})
+	end
+	if not H.Font then
+		tab:Section("Font")
+		tab:FontPicker({
+			Name = "UI Font",
+			Default = Library.FontName,
+			Callback = function(name)
+				Library:SetFont(name)
+			end,
+		})
+	end
+	if not H.Icon then
+		tab:Section("Icons")
+		tab:IconPicker({
+			Name = "UI Icon",
+			Default = W.Icon or "",
+			Callback = function(name)
+				W:SetIcon(name ~= "" and name or nil)
+			end,
+		})
+	end
+	if not H.Effects then
+		tab:Section("Effects")
+		local fxNames = {
+			{"Border", "Animated Border"},
+			{"Glow", "Glow"},
+			{"Neon", "Neon Line"},
+			{"Shimmer", "Title Shimmer"},
+			{"Embers", "Embers"},
+			{"Aurora", "Aurora"},
+			{"Sounds", "Click Sounds"},
+		}
+		for _, entry in ipairs(fxNames) do
+			tab:Toggle({
+				Name = entry[2],
+				Default = W.FX[entry[1]],
+				Callback = function(on)
+					W:SetEffect(entry[1], on)
+				end,
 			})
-		end,
-	})
-	tab:Button({
-		Name = "Load Config",
-		Callback = function()
-			local ok, err = Library:LoadConfig(W.ConfigFile)
-			if ok then
+		end
+		tab:Slider({
+			Name = "Border Speed",
+			Min = 10,
+			Max = 300,
+			Step = 5,
+			Default = W.BorderSpeed,
+			Callback = function(value)
+				W.BorderSpeed = value
+			end,
+		})
+	end
+	if not H.Intro then
+		tab:Section("Intro")
+		tab:Toggle({
+			Name = "Loading Screen (next execute)",
+			Default = Library.IntroEnabled,
+			Callback = function(on)
+				Library:SetIntroEnabled(on)
+			end,
+		})
+		local cfg = Library:GetIntroConfig()
+		introPick = tab:Dropdown({
+			Name = "Intro",
+			Options = sortedKeys(Library.Intros),
+			Default = Library.ActiveIntro,
+			Callback = function(pick)
+				Library:SetIntro(pick)
 				local now = Library:GetIntroConfig()
-				uiColor:Set(Theme.Accent, true)
 				introText:Set(now.Text, true)
 				introSub:Set(now.Subtitle, true)
 				introImage:Set(now.Image and tostring(now.Image) or "", true)
 				introSound:Set(now.Sound and tostring(now.Sound) or "", true)
 				introDuration:Set(now.Duration, true)
 				introColor:Set(now.ResolvedColors.Primary, true)
-			end
-			W:Notify({
-				Title = ok and "Config loaded" or "Load failed",
-				Content = ok and W.ConfigFile or tostring(err),
-				Type = ok and "success" or "error",
-			})
-		end,
-	})
-
-	if Library.KeyValid and Library.KeyInfo then
+			end,
+		})
+		introStyle = tab:Dropdown({
+			Name = "Intro Style",
+			Options = sortedKeys(Library.IntroStyles),
+			Default = type(cfg.Style) == "string" and cfg.Style or "Emblem",
+			Callback = function(style)
+				Library:SetIntroStyle(style)
+			end,
+		})
+		introText = tab:Input({
+			Name = "Intro Text",
+			Default = cfg.Text,
+			Placeholder = "title",
+			Callback = function(text)
+				Library:SetIntro({Text = text})
+			end,
+		})
+		introSub = tab:Input({
+			Name = "Intro Subtitle",
+			Default = cfg.Subtitle,
+			Placeholder = "subtitle",
+			Callback = function(text)
+				Library:SetIntro({Subtitle = text})
+			end,
+		})
+		introImage = tab:Input({
+			Name = "Intro Image",
+			Default = cfg.Image and tostring(cfg.Image) or "",
+			Placeholder = "id / link / file",
+			Callback = function(text)
+				Library:SetIntroImage(text ~= "" and text or nil)
+			end,
+		})
+		introSound = tab:Input({
+			Name = "Intro Sound",
+			Default = cfg.Sound and tostring(cfg.Sound) or "",
+			Placeholder = "sound id",
+			Callback = function(text)
+				Library:SetIntroSound(text ~= "" and text or nil)
+			end,
+		})
+		introDuration = tab:Slider({
+			Name = "Intro Duration",
+			Min = 2,
+			Max = 12,
+			Step = 0.5,
+			Suffix = "s",
+			Default = cfg.Duration,
+			Callback = function(value)
+				Library:SetIntroDuration(value)
+			end,
+		})
+		introColor = tab:ColorPicker({
+			Name = "Intro Color",
+			Default = cfg.ResolvedColors.Primary,
+			Callback = function(color)
+				Library:SetIntroColor(color)
+			end,
+		})
+		tab:IconPicker({
+			Name = "Intro Icon",
+			Default = cfg.Icon or "",
+			Callback = function(name)
+				Library:SetIntro({Icon = name ~= "" and name or false})
+			end,
+		})
+		tab:Button({
+			Name = "Intro Color = follow UI Color",
+			Callback = function()
+				Library:SetIntroColor(nil)
+				introColor:Set(Theme.Accent, true)
+				W:Notify({Title = "Intro color", Content = "Now follows the UI color", Type = "info"})
+			end,
+		})
+		tab:Button({
+			Name = "Preview Intro",
+			Solid = true,
+			Callback = function()
+				Library:PlayIntro()
+			end,
+		})
+	end
+	if not H.Config then
+		tab:Section("Config")
+		tab:Button({
+			Name = "Save Config",
+			Callback = function()
+				local ok, err = Library:SaveConfig(W.ConfigFile)
+				W:Notify({
+					Title = ok and "Config saved" or "Save failed",
+					Content = ok and W.ConfigFile or tostring(err),
+					Type = ok and "success" or "error",
+				})
+			end,
+		})
+		tab:Button({
+			Name = "Load Config",
+			Callback = function()
+				local ok, err = Library:LoadConfig(W.ConfigFile)
+				if ok then
+					local now = Library:GetIntroConfig()
+					if uiColor then
+						uiColor:Set(Theme.Accent, true)
+					end
+					if introText then
+						introText:Set(now.Text, true)
+						introSub:Set(now.Subtitle, true)
+						introImage:Set(now.Image and tostring(now.Image) or "", true)
+						introSound:Set(now.Sound and tostring(now.Sound) or "", true)
+						introDuration:Set(now.Duration, true)
+						introColor:Set(now.ResolvedColors.Primary, true)
+					end
+				end
+				W:Notify({
+					Title = ok and "Config loaded" or "Load failed",
+					Content = ok and W.ConfigFile or tostring(err),
+					Type = ok and "success" or "error",
+				})
+			end,
+		})
+	end
+	if not H.Key and Library.KeyValid and Library.KeyInfo then
 		tab:Section("Key", "key")
 		tab:Label("Key: " .. Library:GetMaskedKey(), "key")
 		tab:Label("Status: " .. Library:GetKeyStatusText())
@@ -5967,26 +6046,28 @@ function Window:CreateSettingsTab(name)
 			end,
 		})
 	end
-	tab:Section("UI", "trash")
-	local confirmAt = -10
-	local destroyBtn
-	destroyBtn = tab:Button({
-		Name = "Destroy UI",
-		Icon = "trash",
-		Callback = function()
-			if os.clock() - confirmAt < 3 then
-				W:Destroy()
-			else
-				confirmAt = os.clock()
-				destroyBtn:SetName("Tap again to confirm")
-				task.delay(3, function()
-					if W.Alive and os.clock() - confirmAt >= 3 then
-						destroyBtn:SetName("Destroy UI")
-					end
-				end)
-			end
-		end,
-	})
+	if not H.DestroyUI then
+		tab:Section("UI", "trash")
+		local confirmAt = -10
+		local destroyBtn
+		destroyBtn = tab:Button({
+			Name = "Destroy UI",
+			Icon = "trash",
+			Callback = function()
+				if os.clock() - confirmAt < 3 then
+					W:Destroy()
+				else
+					confirmAt = os.clock()
+					destroyBtn:SetName("Tap again to confirm")
+					task.delay(3, function()
+						if W.Alive and os.clock() - confirmAt >= 3 then
+							destroyBtn:SetName("Destroy UI")
+						end
+					end)
+				end
+			end,
+		})
+	end
 	return tab
 end
 do
