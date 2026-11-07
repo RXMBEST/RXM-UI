@@ -1,3 +1,4 @@
+-- RXM UI OPEN SOURCE --
 local function svc(name)
 	local service = game:GetService(name)
 	if cloneref then
@@ -510,6 +511,47 @@ local function soundId(spec)
 		return "rbxassetid://" .. spec
 	end
 	return spec
+end
+local SFX = {
+	Open = {id = "rbxassetid://77120543307812", volume = 0.8, flag = "Sounds"},
+	Toggle = {id = "rbxassetid://12222183", volume = 0.8, flag = "SwitchSounds"},
+	Notify = {id = "rbxassetid://71450094482101", volume = 0.9, flag = "NotifySounds"},
+	Slider = {id = "rbxassetid://105544173943722", volume = 0.6, flag = "SliderSounds"},
+}
+local SLIDER_TICK = 0.1
+local function makeSfx(parent, isEnabled)
+	local pools, cursor, warm = {}, {}, {}
+	for name, info in pairs(SFX) do
+		local pool = {}
+		for i = 1, 3 do
+			pool[i] = new("Sound", {
+				Name = "Sfx" .. name .. i,
+				SoundId = info.id,
+				Volume = info.volume,
+				Parent = parent,
+			})
+		end
+		pools[name] = pool
+		cursor[name] = 0
+		table.insert(warm, pool[1])
+	end
+	task.spawn(function()
+		pcall(function()
+			ContentProvider:PreloadAsync(warm)
+		end)
+	end)
+	return function(name, speed, vol)
+		local pool = pools[name]
+		if not pool or not isEnabled(SFX[name].flag) then
+			return
+		end
+		cursor[name] = cursor[name] % #pool + 1
+		local snd = pool[cursor[name]]
+		snd.PlaybackSpeed = speed or 1
+		snd.Volume = SFX[name].volume * (vol or 1)
+		snd.TimePosition = 0
+		snd:Play()
+	end
 end
 local FontList, FontByName = {}, {}
 Library.Fonts = FontList
@@ -2460,6 +2502,25 @@ local Window = {}
 Window.__index = Window
 local Tab = {}
 Tab.__index = Tab
+local TAB_POSITION_ALIAS = {
+	up = "Up",
+	top = "Up",
+	atas = "Up",
+	down = "Down",
+	bottom = "Down",
+	bawah = "Down",
+	left = "Left",
+	kiri = "Left",
+	right = "Right",
+	kanan = "Right",
+}
+local function normalizeTabPosition(value)
+	if type(value) ~= "string" then
+		return nil
+	end
+	local cleaned = string.gsub(value, "%s", "")
+	return TAB_POSITION_ALIAS[string.lower(cleaned)]
+end
 local function kindColor(kind)
 	if kind == "success" then
 		return Color3.fromRGB(64, 222, 140)
@@ -2519,6 +2580,31 @@ function Window:_build(opts)
 		PH = math.clamp(viewport.Y - 70, 236, 320)
 	end
 	W.PW, W.PH = PW, PH
+	local TP = {
+		pos = normalizeTabPosition(W.TabPosition) or "Up",
+		side = math.clamp(math.floor(PW * 0.26), 84, 124),
+		top = HEADER_H + 4,
+		shift = {
+			Up = Vector2.new(0, -8),
+			Down = Vector2.new(0, 8),
+			Left = Vector2.new(-8, 0),
+			Right = Vector2.new(8, 0),
+		},
+	}
+	TP.vertical = TP.pos == "Left" or TP.pos == "Right"
+	W.TabPosition = TP.pos
+	W.PageWidth = PW - 24
+	W._layoutHooks = {}
+	function TP.slide(d)
+		if TP.vertical then
+			return UDim2.fromScale(0, d)
+		end
+		return UDim2.fromScale(d, 0)
+	end
+	function TP.itemSize(count)
+		local barH = PH - (TP.top + 12)
+		return math.clamp(math.floor((barH - 6) / math.max(count, 1)), 24, 36)
+	end
 	local gui = new("ScreenGui", {
 		Name = "RXMUI_Window",
 		ResetOnSpawn = false,
@@ -2532,6 +2618,9 @@ function Window:_build(opts)
 	W.Gui = gui
 	W.Click = makeClicker(gui, function()
 		return W.Alive and W.FX.Sounds
+	end)
+	W.Sfx = makeSfx(gui, function(flag)
+		return W.Alive and W.FX[flag]
 	end)
 	local PROFILES = {
 		open = {w = {175, 0.64}, h = {150, 0.66}, r = {210, 0.72}},
@@ -2970,7 +3059,7 @@ function Window:_build(opts)
 		highlight.BackgroundColor3 = T.Accent
 		highlightStroke.Color = T.Accent
 	end)
-	new("Frame", {
+	TP.divider = new("Frame", {
 		Position = UDim2.new(0, 14, 0, PAGE_TOP - 5),
 		Size = UDim2.new(1, -28, 0, 1),
 		BackgroundColor3 = Theme.Stroke,
@@ -3019,17 +3108,76 @@ function Window:_build(opts)
 	end)
 	W._tabBar, W._pageHost = tabBar, pageHost
 	local chromeRest = {header = header.Position, tabs = tabBar.Position, pages = pageHost.Position}
+	function TP.geometry(pos)
+		local side, top = TP.side, TP.top
+		local line = TP.divider
+		TP.pos = pos
+		TP.vertical = pos == "Left" or pos == "Right"
+		neonGrad.Rotation = TP.vertical and 90 or 0
+		if pos == "Up" then
+			tabBar.AnchorPoint = Vector2.new(0, 0)
+			tabBar.Position = UDim2.new(0, 12, 0, HEADER_H)
+			tabBar.Size = UDim2.new(1, -24, 0, TABBAR_H)
+			line.Position = UDim2.new(0, 14, 0, PAGE_TOP - 5)
+			line.Size = UDim2.new(1, -28, 0, 1)
+			neonLine.Position = UDim2.new(0, 14, 0, PAGE_TOP - 6)
+			neonLine.Size = UDim2.new(1, -28, 0, 2)
+			pageHost.Position = UDim2.new(0, 12, 0, PAGE_TOP)
+			pageHost.Size = UDim2.new(1, -24, 1, -(PAGE_TOP + 12))
+			W.PageWidth = PW - 24
+		elseif pos == "Down" then
+			tabBar.AnchorPoint = Vector2.new(0, 1)
+			tabBar.Position = UDim2.new(0, 12, 1, -12)
+			tabBar.Size = UDim2.new(1, -24, 0, TABBAR_H)
+			line.Position = UDim2.new(0, 14, 1, -(12 + TABBAR_H + 4))
+			line.Size = UDim2.new(1, -28, 0, 1)
+			neonLine.Position = UDim2.new(0, 14, 1, -(12 + TABBAR_H + 4))
+			neonLine.Size = UDim2.new(1, -28, 0, 2)
+			pageHost.Position = UDim2.new(0, 12, 0, top)
+			pageHost.Size = UDim2.new(1, -24, 1, -(top + 12 + TABBAR_H + 8))
+			W.PageWidth = PW - 24
+		elseif pos == "Left" then
+			local edge = 12 + side
+			tabBar.AnchorPoint = Vector2.new(0, 0)
+			tabBar.Position = UDim2.new(0, 12, 0, top)
+			tabBar.Size = UDim2.new(0, side, 1, -(top + 12))
+			line.Position = UDim2.new(0, edge + 3, 0, top + 2)
+			line.Size = UDim2.new(0, 1, 1, -(top + 16))
+			neonLine.Position = UDim2.new(0, edge + 2, 0, top + 2)
+			neonLine.Size = UDim2.new(0, 2, 1, -(top + 16))
+			pageHost.Position = UDim2.new(0, edge + 8, 0, top)
+			pageHost.Size = UDim2.new(1, -(edge + 20), 1, -(top + 12))
+			W.PageWidth = PW - (edge + 20)
+		else
+			local edge = 12 + side
+			tabBar.AnchorPoint = Vector2.new(1, 0)
+			tabBar.Position = UDim2.new(1, -12, 0, top)
+			tabBar.Size = UDim2.new(0, side, 1, -(top + 12))
+			line.Position = UDim2.new(1, -(edge + 4), 0, top + 2)
+			line.Size = UDim2.new(0, 1, 1, -(top + 16))
+			neonLine.Position = UDim2.new(1, -(edge + 4), 0, top + 2)
+			neonLine.Size = UDim2.new(0, 2, 1, -(top + 16))
+			pageHost.Position = UDim2.new(0, 12, 0, top)
+			pageHost.Size = UDim2.new(1, -(edge + 20), 1, -(top + 12))
+			W.PageWidth = PW - (edge + 20)
+		end
+		chromeRest.tabs = tabBar.Position
+		chromeRest.pages = pageHost.Position
+	end
+	TP.geometry(TP.pos)
 	local function revealChrome(delay)
+		local sh = TP.shift[TP.pos]
 		header.Position = chromeRest.header + UDim2.fromOffset(0, -10)
-		tabBar.Position = chromeRest.tabs + UDim2.fromOffset(0, -8)
+		tabBar.Position = chromeRest.tabs + UDim2.fromOffset(sh.X, sh.Y)
 		pageHost.Position = chromeRest.pages + UDim2.fromOffset(0, 10)
 		tween(header, 0.65, {Position = chromeRest.header}, ES.Quint, ED.Out, delay)
 		tween(tabBar, 0.65, {Position = chromeRest.tabs}, ES.Quint, ED.Out, delay + 0.04)
 		tween(pageHost, 0.65, {Position = chromeRest.pages}, ES.Quint, ED.Out, delay + 0.08)
 	end
 	local function hideChrome()
+		local sh = TP.shift[TP.pos]
 		tween(header, 0.22, {Position = chromeRest.header + UDim2.fromOffset(0, -6)}, ES.Quad, ED.In)
-		tween(tabBar, 0.22, {Position = chromeRest.tabs + UDim2.fromOffset(0, -4)}, ES.Quad, ED.In)
+		tween(tabBar, 0.22, {Position = chromeRest.tabs + UDim2.fromOffset(sh.X / 2, sh.Y / 2)}, ES.Quad, ED.In)
 		tween(pageHost, 0.22, {Position = chromeRest.pages + UDim2.fromOffset(0, 6)}, ES.Quad, ED.In)
 	end
 	local embers = new("Frame", {
@@ -3147,6 +3295,7 @@ function Window:_build(opts)
 		updateBackdrop()
 		glowKick = 1
 		if newState == "expanded" then
+			W.Sfx("Open")
 			applyProfile(PROFILES.open)
 			applyTargets()
 			showGroup(idleG, false, 0, 0.1)
@@ -3170,6 +3319,7 @@ function Window:_build(opts)
 			showGroup(idleG, true, 0.12, 0.3)
 			idleIntro(0.14)
 			if old == "expanded" then
+				W.Sfx("Open")
 				hideChrome()
 			end
 		end
@@ -3255,16 +3405,13 @@ function Window:_build(opts)
 		end
 	end)
 	idleHit.MouseButton1Click:Connect(function()
-		W.Click(1, 0.9)
 		setState("expanded")
 	end)
 	noteHit.MouseButton1Click:Connect(function()
-		W.Click(1, 0.9)
 		setState("expanded")
 	end)
 	backdrop.MouseButton1Click:Connect(function()
 		if state == "expanded" then
-			W.Click(0.95, 0.8)
 			setState("idle")
 		end
 	end)
@@ -3341,7 +3488,8 @@ function Window:_build(opts)
 		end
 		if panelG.frame.Visible then
 			if W.FX.Neon then
-				neonGrad.Offset = Vector2.new(((clock * 0.35) % 2) - 1, 0)
+				local sweep = ((clock * 0.35) % 2) - 1
+				neonGrad.Offset = Vector2.new(sweep, TP.vertical and sweep or 0)
 			end
 			if W.FX.Shimmer then
 				titleGrad.Offset = Vector2.new(((clock * 0.4) % 2) - 1, 0)
@@ -3537,7 +3685,7 @@ function Window:_build(opts)
 			table.insert(W._pending, data)
 			return
 		end
-		W.Click(0.8, 0.8)
+		W.Sfx("Notify")
 		if state == "idle" and not queueBusy then
 			showIslandNotice(item)
 		else
@@ -3555,6 +3703,34 @@ function Window:_build(opts)
 	end
 	local function moveHighlight(index, instant)
 		local n = math.max(#tabs, 1)
+		if instant then
+			hlToken = hlToken + 1
+		end
+		if TP.vertical then
+			local h = TP.itemSize(n)
+			local toY = (index - 1) * h + 3
+			local restSize = UDim2.new(1, -6, 0, h - 6)
+			if instant then
+				highlight.Position = UDim2.new(0, 3, 0, toY)
+				highlight.Size = restSize
+				return
+			end
+			hlToken = hlToken + 1
+			local token = hlToken
+			local fromY = highlight.Position.Y.Offset
+			local dist = math.abs(toY - fromY)
+			tween(highlight, 0.16, {
+				Position = UDim2.new(0, 3, 0, math.min(fromY, toY)),
+				Size = UDim2.new(1, -6, 0, h - 6 + dist),
+			}, ES.Quad, ED.Out)
+			task.delay(0.15, function()
+				if token ~= hlToken or not W.Alive then
+					return
+				end
+				tween(highlight, 0.45, {Position = UDim2.new(0, 3, 0, toY), Size = restSize}, ES.Back, ED.Out)
+			end)
+			return
+		end
 		local toX = (index - 1) / n
 		local restSize = UDim2.new(1 / n, -6, 1, -6)
 		if instant then
@@ -3579,10 +3755,17 @@ function Window:_build(opts)
 	end
 	local function layoutTabs()
 		local n = #tabs
-		local avail = (PW - 24) / math.max(n, 1)
+		local vertical = TP.vertical
+		local h = TP.itemSize(n)
+		local avail = vertical and TP.side or (PW - 24) / math.max(n, 1)
 		for i, tab in ipairs(tabs) do
-			tab.button.Position = UDim2.new((i - 1) / n, 0, 0, 0)
-			tab.button.Size = UDim2.new(1 / n, 0, 1, 0)
+			if vertical then
+				tab.button.Position = UDim2.new(0, 0, 0, (i - 1) * h)
+				tab.button.Size = UDim2.new(1, 0, 0, h)
+			else
+				tab.button.Position = UDim2.new((i - 1) / n, 0, 0, 0)
+				tab.button.Size = UDim2.new(1 / n, 0, 1, 0)
+			end
 			if tab.icon then
 				tab.label.Visible = avail >= (14 + 5 + tab.textW + 14)
 			end
@@ -3596,7 +3779,7 @@ function Window:_build(opts)
 		tab.slideTok = tab.slideTok + 1
 		local tok = tab.slideTok
 		tab.page.ZIndex = 2
-		tween(tab.page, SLIDE_T, {Position = UDim2.fromScale(-dir, 0)}, ES.Quint, ED.Out)
+		tween(tab.page, SLIDE_T, {Position = TP.slide(-dir)}, ES.Quint, ED.Out)
 		task.delay(SLIDE_T + 0.04, function()
 			if tab.slideTok == tok and W.Alive and currentTab ~= tab then
 				tab.page.Visible = false
@@ -3612,7 +3795,7 @@ function Window:_build(opts)
 			tab.page.Visible = true
 		else
 			if not tab.page.Visible then
-				tab.page.Position = UDim2.fromScale(dir, 0)
+				tab.page.Position = TP.slide(dir)
 				tab.page.Visible = true
 			end
 			tween(tab.page, SLIDE_T, {Position = UDim2.new()}, ES.Quint, ED.Out)
@@ -3660,6 +3843,33 @@ function Window:_build(opts)
 		if type(which) == "table" and which.page then
 			selectTab(which)
 		end
+	end
+	function W:GetTabPosition()
+		return TP.pos
+	end
+	function W:SetTabPosition(position, instant)
+		local pos = normalizeTabPosition(position)
+		if not pos then
+			return false
+		end
+		if pos == TP.pos then
+			return pos
+		end
+		TP.geometry(pos)
+		W.TabPosition = pos
+		layoutTabs()
+		for _, hook in ipairs(W._layoutHooks) do
+			pcall(hook)
+		end
+		if not instant and W.Alive then
+			local sh = TP.shift[pos]
+			local tabRest, pageRest = tabBar.Position, pageHost.Position
+			tabBar.Position = tabRest + UDim2.fromOffset(sh.X * 3, sh.Y * 3)
+			pageHost.Position = pageRest + UDim2.fromOffset(0, 10)
+			tween(tabBar, 0.5, {Position = tabRest}, ES.Quint, ED.Out)
+			tween(pageHost, 0.5, {Position = pageRest}, ES.Quint, ED.Out, 0.05)
+		end
+		return pos
 	end
 	function W:AddTab(name, icon)
 		if type(name) == "table" then
@@ -4055,10 +4265,12 @@ end
 function Tab:Paragraph(o)
 	local W = self.Window
 	o = o or {}
-	local textW = math.max(W.PW - 64, 120)
+	local function textWidth()
+		return math.max((W.PageWidth or (W.PW - 24)) - 40, 120)
+	end
 	local function measure(text)
 		local ok, size = pcall(function()
-			return TextService:GetTextSize(text, 12, Enum.Font.Gotham, Vector2.new(textW, 10000))
+			return TextService:GetTextSize(text, 12, Enum.Font.Gotham, Vector2.new(textWidth(), 10000))
 		end)
 		return ok and size.Y or 16
 	end
@@ -4087,6 +4299,9 @@ function Tab:Paragraph(o)
 		c.slot.Size = UDim2.new(1, 0, 0, 36 + measure(body.Text))
 	end
 	resize()
+	if W._layoutHooks then
+		table.insert(W._layoutHooks, resize)
+	end
 	local object = {}
 	function object:Set(title, text)
 		c.title.Text = tostring(title or "")
@@ -4147,7 +4362,7 @@ end
 function Tab:Toggle(o)
 	local W = self.Window
 	o = o or {}
-	local c = self:_card(40, o.Name, {Icon = o.Icon})
+	local c = self:_card(40, o.Name, {silent = true, Icon = o.Icon})
 	local on = o.Default and true or false
 	local track = new("Frame", {
 		AnchorPoint = Vector2.new(1, 0.5),
@@ -4228,6 +4443,7 @@ function Tab:Toggle(o)
 		object:Set(not on)
 	end
 	c.hit.MouseButton1Click:Connect(function()
+		W.Sfx("Toggle")
 		object:Set(not on)
 	end)
 	setFlag(o, on)
@@ -4299,11 +4515,22 @@ function Tab:Slider(o)
 	local function show(v)
 		box.Text = string.format("%g", v) .. suffix
 	end
+	local lastTick = 0
+	local function tickSfx()
+		local now = os.clock()
+		if now - lastTick >= SLIDER_TICK then
+			lastTick = now
+			W.Sfx("Slider")
+		end
+	end
 	local function setValue(v, silent, typed)
 		v = math.clamp(math.floor(v / step + 0.5) * step, min, max)
 		v = tonumber(string.format("%.4f", v))
 		local changed = v ~= value
 		value = v
+		if changed and dragging then
+			tickSfx()
+		end
 		local a = max > min and (v - min) / (max - min) or 0
 		tween(fill, dragging and 0.06 or 0.22, {Size = UDim2.fromScale(a, 1)}, ES.Quad, ED.Out)
 		if not typed then
@@ -4347,7 +4574,8 @@ function Tab:Slider(o)
 	local pending = nil
 	local function beginDrag(x)
 		dragging = true
-		W.Click(1.1, 0.6)
+		W.Sfx("Slider")
+		lastTick = os.clock()
 		self.scroll.ScrollingEnabled = false
 		tween(knobScale, 0.2, {Scale = 1.4}, ES.Back, ED.Out)
 		tween(knobStroke, 0.2, {Transparency = 0.25}, ES.Quad)
@@ -5479,6 +5707,9 @@ local function applyWindowConfig(W, wc)
 	if type(wc.BorderSpeed) == "number" then
 		W.BorderSpeed = wc.BorderSpeed
 	end
+	if type(wc.TabPosition) == "string" then
+		W:SetTabPosition(wc.TabPosition, true)
+	end
 	if type(wc.ToggleKey) == "string" then
 		local ok, key = pcall(function()
 			return Enum.KeyCode[wc.ToggleKey]
@@ -5521,7 +5752,7 @@ function Library:SaveConfig(fileName)
 	}
 	local W = self.Windows[1]
 	if W then
-		data.Window = {FX = W.FX, Scale = W.Scale, BorderSpeed = W.BorderSpeed, ToggleKey = W.ToggleKey.Name, Icon = W.Icon, IslandWidth = W.IslandWidth}
+		data.Window = {FX = W.FX, Scale = W.Scale, BorderSpeed = W.BorderSpeed, ToggleKey = W.ToggleKey.Name, Icon = W.Icon, IslandWidth = W.IslandWidth, TabPosition = W.TabPosition}
 	end
 	local okJson, json = pcall(function()
 		return HttpService:JSONEncode(data)
@@ -5634,7 +5865,8 @@ function Library:CreateWindow(opts)
 	W.ToggleKey = opts.ToggleKey or Enum.KeyCode.RightControl
 	W.Scale = opts.Scale or 0.9
 	W.BorderSpeed = opts.BorderSpeed or 70
-	W.FX = {Border = true, Glow = true, Neon = true, Shimmer = true, Embers = true, Aurora = true, Sounds = true}
+	W.TabPosition = normalizeTabPosition(opts.TabPosition) or "Up"
+	W.FX = {Border = true, Glow = true, Neon = true, Shimmer = true, Embers = true, Aurora = true, Sounds = true, NotifySounds = true, SliderSounds = true, SwitchSounds = true}
 	local wc = self._windowConfig
 	if type(wc) == "table" then
 		if type(wc.FX) == "table" then
@@ -5655,6 +5887,12 @@ function Library:CreateWindow(opts)
 		end
 		if opts.BorderSpeed == nil and type(wc.BorderSpeed) == "number" then
 			W.BorderSpeed = wc.BorderSpeed
+		end
+		if opts.TabPosition == nil then
+			local savedPos = normalizeTabPosition(wc.TabPosition)
+			if savedPos then
+				W.TabPosition = savedPos
+			end
 		end
 		if opts.ToggleKey == nil and type(wc.ToggleKey) == "string" then
 			local okKey, key = pcall(function()
@@ -5747,13 +5985,14 @@ function Window:CreateSettingsTab(name, hide)
 		UITransparency = true,
 		IslandWidth = true,
 		ToggleKey = true,
+		TabPosition = false,
 		Font = true,
 		Icon = true,
 		Effects = false,
 		Intro = true,
 		Config = true,
 		Key = true,
-		DestroyUI = false,
+		DestroyUI = true,
 	}
 	if type(hide) == "table" then
 		for k, v in pairs(hide) do
@@ -5764,7 +6003,7 @@ function Window:CreateSettingsTab(name, hide)
 	end
 	local tab = W:AddTab(name or "Settings")
 	local uiColor, introColor, introText, introSub, introImage, introSound, introDuration, introStyle, introPick
-	if not (H.UIColor and H.Preset and H.UIScale and H.UITransparency and H.IslandWidth and H.ToggleKey) then
+	if not (H.UIColor and H.Preset and H.UIScale and H.UITransparency and H.IslandWidth and H.ToggleKey and H.TabPosition) then
 		tab:Section("Appearance")
 	end
 	if not H.UIColor then
@@ -5838,6 +6077,16 @@ function Window:CreateSettingsTab(name, hide)
 			end,
 		})
 	end
+	if not H.TabPosition then
+		tab:Dropdown({
+			Name = "Tab Position",
+			Options = {"Up", "Down", "Left", "Right"},
+			Default = W.TabPosition,
+			Callback = function(value)
+				W:SetTabPosition(value)
+			end,
+		})
+	end
 	if not H.Font then
 		tab:Section("Font")
 		tab:FontPicker({
@@ -5868,6 +6117,9 @@ function Window:CreateSettingsTab(name, hide)
 			{"Embers", "Embers"},
 			{"Aurora", "Aurora"},
 			{"Sounds", "Click Sounds"},
+			{"NotifySounds", "Notify Sounds"},
+			{"SliderSounds", "Slider Sounds"},
+			{"SwitchSounds", "Switch Sounds"},
 		}
 		for _, entry in ipairs(fxNames) do
 			tab:Toggle({
