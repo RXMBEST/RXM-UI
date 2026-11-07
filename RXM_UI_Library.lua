@@ -516,7 +516,7 @@ local SFX = {
 	Open = {id = "rbxassetid://77120543307812", volume = 0.8, flag = "Sounds"},
 	Toggle = {id = "rbxassetid://12222183", volume = 0.8, flag = "SwitchSounds"},
 	Notify = {id = "rbxassetid://71450094482101", volume = 0.9, flag = "NotifySounds"},
-	Slider = {id = "rbxassetid://105544173943722", volume = 0.6, flag = "SliderSounds"},
+	Slider = {id = "rbxassetid://15675032796", volume = 0.7, flag = "SliderSounds"},
 }
 local SLIDER_TICK = 0.1
 local function makeSfx(parent, isEnabled)
@@ -2582,7 +2582,7 @@ function Window:_build(opts)
 	W.PW, W.PH = PW, PH
 	local TP = {
 		pos = normalizeTabPosition(W.TabPosition) or "Up",
-		side = math.clamp(math.floor(PW * 0.26), 84, 124),
+		side = math.clamp(math.floor(PW * 0.24), 80, 120),
 		top = HEADER_H + 4,
 		shift = {
 			Up = Vector2.new(0, -8),
@@ -2603,7 +2603,7 @@ function Window:_build(opts)
 	end
 	function TP.itemSize(count)
 		local barH = PH - (TP.top + 12)
-		return math.clamp(math.floor((barH - 6) / math.max(count, 1)), 24, 36)
+		return math.clamp(math.floor((barH - 12) / math.max(count, 1)), 24, 36)
 	end
 	local gui = new("ScreenGui", {
 		Name = "RXMUI_Window",
@@ -3041,7 +3041,7 @@ function Window:_build(opts)
 		ZIndex = 3,
 		Parent = panel,
 	})
-	round(tabBar)
+	local tabCorner = round(tabBar)
 	local tabBarStroke = stroke(tabBar, Theme.Stroke, 1, 0.3)
 	bindTheme(tabBar, function()
 		tabBar.BackgroundTransparency = math.clamp(0.1 + Library.Transparency * 0.6, 0, 0.9)
@@ -3114,6 +3114,7 @@ function Window:_build(opts)
 		TP.pos = pos
 		TP.vertical = pos == "Left" or pos == "Right"
 		neonGrad.Rotation = TP.vertical and 90 or 0
+		tabCorner.CornerRadius = TP.vertical and UDim.new(0, 16) or UDim.new(0.5, 0)
 		if pos == "Up" then
 			tabBar.AnchorPoint = Vector2.new(0, 0)
 			tabBar.Position = UDim2.new(0, 12, 0, HEADER_H)
@@ -3141,25 +3142,25 @@ function Window:_build(opts)
 			tabBar.AnchorPoint = Vector2.new(0, 0)
 			tabBar.Position = UDim2.new(0, 12, 0, top)
 			tabBar.Size = UDim2.new(0, side, 1, -(top + 12))
-			line.Position = UDim2.new(0, edge + 3, 0, top + 2)
-			line.Size = UDim2.new(0, 1, 1, -(top + 16))
-			neonLine.Position = UDim2.new(0, edge + 2, 0, top + 2)
-			neonLine.Size = UDim2.new(0, 2, 1, -(top + 16))
-			pageHost.Position = UDim2.new(0, edge + 8, 0, top)
-			pageHost.Size = UDim2.new(1, -(edge + 20), 1, -(top + 12))
-			W.PageWidth = PW - (edge + 20)
+			line.Position = UDim2.new(0, edge + 7, 0, top + 8)
+			line.Size = UDim2.new(0, 1, 1, -(top + 28))
+			neonLine.Position = UDim2.new(0, edge + 6, 0, top + 8)
+			neonLine.Size = UDim2.new(0, 2, 1, -(top + 28))
+			pageHost.Position = UDim2.new(0, edge + 14, 0, top)
+			pageHost.Size = UDim2.new(1, -(edge + 26), 1, -(top + 12))
+			W.PageWidth = PW - (edge + 26)
 		else
 			local edge = 12 + side
 			tabBar.AnchorPoint = Vector2.new(1, 0)
 			tabBar.Position = UDim2.new(1, -12, 0, top)
 			tabBar.Size = UDim2.new(0, side, 1, -(top + 12))
-			line.Position = UDim2.new(1, -(edge + 4), 0, top + 2)
-			line.Size = UDim2.new(0, 1, 1, -(top + 16))
-			neonLine.Position = UDim2.new(1, -(edge + 4), 0, top + 2)
-			neonLine.Size = UDim2.new(0, 2, 1, -(top + 16))
+			line.Position = UDim2.new(1, -(edge + 7), 0, top + 8)
+			line.Size = UDim2.new(0, 1, 1, -(top + 28))
+			neonLine.Position = UDim2.new(1, -(edge + 8), 0, top + 8)
+			neonLine.Size = UDim2.new(0, 2, 1, -(top + 28))
 			pageHost.Position = UDim2.new(0, 12, 0, top)
-			pageHost.Size = UDim2.new(1, -(edge + 20), 1, -(top + 12))
-			W.PageWidth = PW - (edge + 20)
+			pageHost.Size = UDim2.new(1, -(edge + 26), 1, -(top + 12))
+			W.PageWidth = PW - (edge + 26)
 		end
 		chromeRest.tabs = tabBar.Position
 		chromeRest.pages = pageHost.Position
@@ -3708,7 +3709,7 @@ function Window:_build(opts)
 		end
 		if TP.vertical then
 			local h = TP.itemSize(n)
-			local toY = (index - 1) * h + 3
+			local toY = 4 + (index - 1) * h + 3
 			local restSize = UDim2.new(1, -6, 0, h - 6)
 			if instant then
 				highlight.Position = UDim2.new(0, 3, 0, toY)
@@ -3760,14 +3761,29 @@ function Window:_build(opts)
 		local avail = vertical and TP.side or (PW - 24) / math.max(n, 1)
 		for i, tab in ipairs(tabs) do
 			if vertical then
-				tab.button.Position = UDim2.new(0, 0, 0, (i - 1) * h)
+				tab.button.Position = UDim2.new(0, 0, 0, 4 + (i - 1) * h)
 				tab.button.Size = UDim2.new(1, 0, 0, h)
 			else
 				tab.button.Position = UDim2.new((i - 1) / n, 0, 0, 0)
 				tab.button.Size = UDim2.new(1 / n, 0, 1, 0)
 			end
+			local showLabel = true
 			if tab.icon then
-				tab.label.Visible = avail >= (14 + 5 + tab.textW + 14)
+				showLabel = avail >= ((vertical and 39 or 33) + tab.textW)
+				tab.label.Visible = showLabel
+			end
+			if tab.row then
+				if vertical and showLabel then
+					tab.row.AnchorPoint = Vector2.new(0, 0.5)
+					tab.row.Position = UDim2.new(0, 12, 0.5, 0)
+				else
+					tab.row.AnchorPoint = Vector2.new(0.5, 0.5)
+					tab.row.Position = UDim2.fromScale(0.5, 0.5)
+				end
+			end
+			if tab.pad then
+				tab.pad.PaddingLeft = UDim.new(0, vertical and 12 or 0)
+				tab.button.TextXAlignment = vertical and Enum.TextXAlignment.Left or Enum.TextXAlignment.Center
 			end
 		end
 		if currentTab then
@@ -3927,8 +3943,12 @@ function Window:_build(opts)
 				return TextService:GetTextSize(name, 12, Enum.Font.GothamMedium, Vector2.new(1000, 20))
 			end)
 			textW = (okSize and size.X or (#name * 7)) * 1.2
+			tab.row = row
 		end
 		tab.label, tab.icon, tab.textW = label, iconObj, textW
+		if not iconObj then
+			tab.pad = new("UIPadding", {Parent = button})
+		end
 		local page = new("Frame", {Name = name, Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Visible = false, Parent = pageHost})
 		local scroll = new("ScrollingFrame", {
 			Size = UDim2.fromScale(1, 1),
@@ -6001,7 +6021,7 @@ function Window:CreateSettingsTab(name, hide)
 			end
 		end
 	end
-	local tab = W:AddTab(name or "Settings")
+	local tab = W:AddTab(name or "Settings", "settings")
 	local uiColor, introColor, introText, introSub, introImage, introSound, introDuration, introStyle, introPick
 	if not (H.UIColor and H.Preset and H.UIScale and H.UITransparency and H.IslandWidth and H.ToggleKey and H.TabPosition) then
 		tab:Section("Appearance")
