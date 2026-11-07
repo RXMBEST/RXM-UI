@@ -2984,7 +2984,7 @@ function Window:_build(opts)
 	round(logoDot)
 	local title = new("TextLabel", {
 		Position = UDim2.new(0, 48, 0, 0),
-		Size = UDim2.new(1, -64, 1, 0),
+		Size = UDim2.new(1, -140, 1, 0),
 		BackgroundTransparency = 1,
 		Text = W.Name,
 		Font = Enum.Font.GothamBold,
@@ -3293,6 +3293,9 @@ function Window:_build(opts)
 		local old = state
 		state = newState
 		W.State = newState
+		if newState ~= "expanded" and W._closeSearch then
+			W._closeSearch(true)
+		end
 		updateBackdrop()
 		glowKick = 1
 		if newState == "expanded" then
@@ -3767,23 +3770,16 @@ function Window:_build(opts)
 				tab.button.Position = UDim2.new((i - 1) / n, 0, 0, 0)
 				tab.button.Size = UDim2.new(1 / n, 0, 1, 0)
 			end
-			local showLabel = true
 			if tab.icon then
-				showLabel = avail >= ((vertical and 39 or 33) + tab.textW)
-				tab.label.Visible = showLabel
-			end
-			if tab.row then
-				if vertical and showLabel then
-					tab.row.AnchorPoint = Vector2.new(0, 0.5)
-					tab.row.Position = UDim2.new(0, 12, 0.5, 0)
-				else
-					tab.row.AnchorPoint = Vector2.new(0.5, 0.5)
-					tab.row.Position = UDim2.fromScale(0.5, 0.5)
-				end
+				-- the label stays centered in the button; the icon only shows when it fits beside it
+				local room = avail >= (tab.textW + 40)
+				tab.icon.Frame.Visible = room
+				tab.label.Position = UDim2.fromOffset(room and 22 or 4, 0)
+				tab.label.Size = UDim2.new(1, room and -44 or -8, 1, 0)
 			end
 			if tab.pad then
-				tab.pad.PaddingLeft = UDim.new(0, vertical and 12 or 0)
-				tab.button.TextXAlignment = vertical and Enum.TextXAlignment.Left or Enum.TextXAlignment.Center
+				tab.pad.PaddingLeft = UDim.new(0, 0)
+				tab.button.TextXAlignment = Enum.TextXAlignment.Center
 			end
 		end
 		if currentTab then
@@ -3839,6 +3835,9 @@ function Window:_build(opts)
 		paintTab(tab, Theme.Text, 0.3)
 		moveHighlight(tab.index, old == nil)
 		slideIn(tab, dir)
+		if W._onTabChanged then
+			W._onTabChanged(tab)
+		end
 	end
 	W._selectFirst = function()
 		if not currentTab and tabs[1] then
@@ -3909,33 +3908,28 @@ function Window:_build(opts)
 		local label, iconObj, textW = button, nil, 0
 		if icon and icon ~= "" then
 			button.Text = ""
+			-- the label is centered in the whole tab button; the icon is pinned to the left edge
 			local row = new("Frame", {
-				AnchorPoint = Vector2.new(0.5, 0.5),
-				Position = UDim2.fromScale(0.5, 0.5),
-				Size = UDim2.fromOffset(0, 0),
-				AutomaticSize = Enum.AutomaticSize.XY,
+				Size = UDim2.fromScale(1, 1),
 				BackgroundTransparency = 1,
 				ZIndex = 4,
 				Parent = button,
 			})
-			new("UIListLayout", {
-				FillDirection = Enum.FillDirection.Horizontal,
-				VerticalAlignment = Enum.VerticalAlignment.Center,
-				HorizontalAlignment = Enum.HorizontalAlignment.Center,
-				Padding = UDim.new(0, 5),
-				SortOrder = Enum.SortOrder.LayoutOrder,
-				Parent = row,
+			iconObj = createIcon(icon, row, 14, Theme.Muted, {
+				AnchorPoint = Vector2.new(0, 0.5),
+				Position = UDim2.new(0, 8, 0.5, 0),
+				ZIndex = 4,
 			})
-			iconObj = createIcon(icon, row, 14, Theme.Muted, {LayoutOrder = 1, ZIndex = 4})
 			label = new("TextLabel", {
-				AutomaticSize = Enum.AutomaticSize.X,
-				Size = UDim2.fromOffset(0, 16),
+				Position = UDim2.fromOffset(22, 0),
+				Size = UDim2.new(1, -44, 1, 0),
 				BackgroundTransparency = 1,
 				Text = name,
 				Font = Enum.Font.GothamMedium,
 				TextSize = 12,
 				TextColor3 = Theme.Muted,
-				LayoutOrder = 2,
+				TextXAlignment = Enum.TextXAlignment.Center,
+				TextTruncate = Enum.TextTruncate.AtEnd,
 				ZIndex = 4,
 				Parent = row,
 			})
@@ -3985,6 +3979,748 @@ function Window:_build(opts)
 		layoutTabs()
 		return tab
 	end
+	-- ====================================================================
+	-- Header buttons (Search + Settings) and the search sheet
+	-- ====================================================================
+	;(function()
+		local function esc(text)
+			return (tostring(text):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"))
+		end
+		local function safeIcon(name, fallback)
+			if type(name) == "string" and name ~= "" and iconDef(name) then
+				return name
+			end
+			return fallback
+		end
+		local KIND_ICON = {
+			Tab = "layout", Toggle = "toggle", Slider = "sliders", Dropdown = "list", Button = "cursor",
+			Input = "edit", Keybind = "keyboard", Color = "droplet", Group = "folder", Icons = "grid", Font = "star",
+		}
+
+		------------------------------------------------------------------
+		-- header buttons
+		------------------------------------------------------------------
+		local function headerButton(iconName, rightOffset)
+			local hb = {active = false, hover = false}
+			local btn = new("TextButton", {
+				Name = "HeaderButton",
+				AnchorPoint = Vector2.new(1, 0.5),
+				Position = UDim2.new(1, rightOffset, 0.5, 0),
+				Size = UDim2.fromOffset(30, 30),
+				BackgroundColor3 = Theme.Accent,
+				BackgroundTransparency = 0.88,
+				BorderSizePixel = 0,
+				AutoButtonColor = false,
+				Text = "",
+				ZIndex = 5,
+				Parent = header,
+			})
+			round(btn)
+			local ring = stroke(btn, Theme.Accent, 1, 0.65)
+			local pop = new("UIScale", {Scale = 1, Parent = btn})
+			createIcon(iconName, btn, 16, "Accent", {
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				Position = UDim2.fromScale(0.5, 0.5),
+				ZIndex = 6,
+			})
+			bindTheme(btn, function(T)
+				btn.BackgroundColor3 = T.Accent
+				ring.Color = T.Accent
+			end)
+			hb.Button = btn
+			function hb.paint()
+				tween(btn, 0.25, {BackgroundTransparency = hb.active and 0.62 or (hb.hover and 0.78 or 0.88)}, ES.Quad)
+				tween(ring, 0.25, {Transparency = hb.active and 0.05 or (hb.hover and 0.35 or 0.65)}, ES.Quad)
+			end
+			btn.MouseEnter:Connect(function()
+				hb.hover = true
+				hb.paint()
+			end)
+			btn.MouseLeave:Connect(function()
+				hb.hover = false
+				hb.paint()
+				tween(pop, 0.3, {Scale = 1}, ES.Back)
+			end)
+			btn.InputBegan:Connect(function(input)
+				if isPress(input) then
+					tween(pop, 0.1, {Scale = 0.88}, ES.Quad)
+				end
+			end)
+			btn.InputEnded:Connect(function(input)
+				if isPress(input) then
+					tween(pop, 0.4, {Scale = 1}, ES.Back)
+				end
+			end)
+			return hb
+		end
+		local searchBtn = headerButton("search", -52)
+		local gearBtn = headerButton("settings", -14)
+
+		------------------------------------------------------------------
+		-- search sheet (covers everything below the header)
+		------------------------------------------------------------------
+		local sheet = new("CanvasGroup", {
+			Name = "SearchSheet",
+			Position = UDim2.fromOffset(0, HEADER_H),
+			Size = UDim2.new(1, 0, 1, -HEADER_H),
+			BackgroundTransparency = 1,
+			GroupTransparency = 1,
+			Visible = false,
+			ZIndex = 9,
+			Parent = panel,
+		})
+		local veil = new("Frame", {
+			Size = UDim2.fromScale(1, 1),
+			BackgroundColor3 = Theme.Background,
+			BackgroundTransparency = 0.1,
+			BorderSizePixel = 0,
+			Active = true,
+			ZIndex = 1,
+			Parent = sheet,
+		})
+		bindTheme(veil, function(T)
+			veil.BackgroundColor3 = T.Background
+			veil.BackgroundTransparency = math.clamp(0.02 + Library.Transparency * 0.3, 0, 0.6)
+		end)
+		local body = new("Frame", {
+			Position = UDim2.fromOffset(12, 0),
+			Size = UDim2.new(1, -24, 1, -10),
+			BackgroundTransparency = 1,
+			ZIndex = 2,
+			Parent = sheet,
+		})
+
+		-- search bar
+		local bar = new("Frame", {
+			Position = UDim2.fromOffset(0, 6),
+			Size = UDim2.new(1, 0, 0, 38),
+			BackgroundColor3 = Theme.Input,
+			BackgroundTransparency = 0.05,
+			BorderSizePixel = 0,
+			ZIndex = 2,
+			Parent = body,
+		})
+		round(bar)
+		local barRing = stroke(bar, Theme.Accent, 1.5, 0.6)
+		bindTheme(bar, function(T)
+			bar.BackgroundColor3 = T.Input
+			barRing.Color = T.Accent
+		end)
+		createIcon("search", bar, 18, "Accent", {
+			AnchorPoint = Vector2.new(0, 0.5),
+			Position = UDim2.new(0, 13, 0.5, 0),
+			ZIndex = 3,
+		})
+		local box = new("TextBox", {
+			Position = UDim2.fromOffset(40, 0),
+			Size = UDim2.new(1, -(40 + 76), 1, 0),
+			BackgroundTransparency = 1,
+			Text = "",
+			PlaceholderText = "Search features...",
+			PlaceholderColor3 = Theme.Muted,
+			TextColor3 = Theme.Text,
+			Font = Enum.Font.GothamMedium,
+			TextSize = 14,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ClearTextOnFocus = false,
+			ZIndex = 3,
+			Parent = bar,
+		})
+		bindTheme(box, function(T)
+			box.TextColor3 = T.Text
+			box.PlaceholderColor3 = T.Muted
+		end)
+		local countLabel = new("TextLabel", {
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -40, 0.5, 0),
+			Size = UDim2.fromOffset(32, 16),
+			BackgroundTransparency = 1,
+			Text = "",
+			Font = Enum.Font.GothamBold,
+			TextSize = 11,
+			TextColor3 = Theme.Accent,
+			TextXAlignment = Enum.TextXAlignment.Right,
+			ZIndex = 3,
+			Parent = bar,
+		})
+		bindTheme(countLabel, function(T)
+			countLabel.TextColor3 = T.Accent
+		end)
+		local clearBtn = new("TextButton", {
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -7, 0.5, 0),
+			Size = UDim2.fromOffset(26, 26),
+			BackgroundColor3 = Theme.Accent,
+			BackgroundTransparency = 0.9,
+			BorderSizePixel = 0,
+			AutoButtonColor = false,
+			Text = "",
+			ZIndex = 4,
+			Parent = bar,
+		})
+		round(clearBtn)
+		bindTheme(clearBtn, function(T)
+			clearBtn.BackgroundColor3 = T.Accent
+		end)
+		createIcon("x", clearBtn, 12, "Muted", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.5),
+			ZIndex = 5,
+		})
+
+		-- tab filter chips
+		local chipRow = new("ScrollingFrame", {
+			Position = UDim2.fromOffset(0, 50),
+			Size = UDim2.new(1, 0, 0, 28),
+			BackgroundTransparency = 1,
+			BorderSizePixel = 0,
+			ScrollBarThickness = 0,
+			ScrollingDirection = Enum.ScrollingDirection.X,
+			CanvasSize = UDim2.new(),
+			AutomaticCanvasSize = Enum.AutomaticSize.X,
+			ZIndex = 2,
+			Parent = body,
+		})
+		new("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			VerticalAlignment = Enum.VerticalAlignment.Center,
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Padding = UDim.new(0, 6),
+			Parent = chipRow,
+		})
+
+		-- results list
+		local results = new("ScrollingFrame", {
+			Position = UDim2.fromOffset(0, 84),
+			Size = UDim2.new(1, 0, 1, -84),
+			BackgroundTransparency = 1,
+			BorderSizePixel = 0,
+			ScrollBarThickness = 3,
+			ScrollBarImageColor3 = Theme.Accent,
+			CanvasSize = UDim2.new(),
+			AutomaticCanvasSize = Enum.AutomaticSize.Y,
+			ZIndex = 2,
+			Parent = body,
+		})
+		bindTheme(results, function(T)
+			results.ScrollBarImageColor3 = T.Accent
+		end)
+		new("UIListLayout", {
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Padding = UDim.new(0, 6),
+			Parent = results,
+		})
+		new("UIPadding", {
+			PaddingTop = UDim.new(0, 2),
+			PaddingBottom = UDim.new(0, 12),
+			PaddingRight = UDim.new(0, 4),
+			Parent = results,
+		})
+
+		-- empty state
+		local empty = new("Frame", {
+			Position = UDim2.fromOffset(0, 100),
+			Size = UDim2.new(1, 0, 0, 100),
+			BackgroundTransparency = 1,
+			Visible = false,
+			ZIndex = 2,
+			Parent = body,
+		})
+		createIcon("search", empty, 34, "Muted", {
+			AnchorPoint = Vector2.new(0.5, 0),
+			Position = UDim2.new(0.5, 0, 0, 0),
+			ZIndex = 3,
+		})
+		local emptyTitle = new("TextLabel", {
+			Position = UDim2.fromOffset(0, 46),
+			Size = UDim2.new(1, 0, 0, 18),
+			BackgroundTransparency = 1,
+			Text = "No results",
+			Font = Enum.Font.GothamBold,
+			TextSize = 13,
+			TextColor3 = Theme.Text,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			ZIndex = 3,
+			Parent = empty,
+		})
+		local emptySub = new("TextLabel", {
+			Position = UDim2.fromOffset(0, 66),
+			Size = UDim2.new(1, 0, 0, 16),
+			BackgroundTransparency = 1,
+			Text = "Try another word or pick a different tab.",
+			Font = Enum.Font.Gotham,
+			TextSize = 11,
+			TextColor3 = Theme.Muted,
+			ZIndex = 3,
+			Parent = empty,
+		})
+		bindTheme(empty, function(T)
+			emptyTitle.TextColor3 = T.Text
+			emptySub.TextColor3 = T.Muted
+		end)
+
+		------------------------------------------------------------------
+		-- search logic
+		------------------------------------------------------------------
+		local searchOpen, searchTok = false, 0
+		local filterTab = nil
+		local shown, chipRefs, lastTokens = {}, {}, {}
+		local go
+
+		local function collect()
+			local list = {}
+			for _, t in ipairs(tabs) do
+				table.insert(list, {
+					Name = t.Name, Tab = t, Kind = "Tab", IsTab = true, Order = 0,
+					Icon = (t.icon and t.icon.Name) or "layout",
+				})
+			end
+			for _, e in ipairs(W._search or {}) do
+				if e.Slot and e.Slot.Parent then
+					table.insert(list, e)
+				end
+			end
+			return list
+		end
+
+		local function scoreEntry(e, tokens)
+			local nameL = string.lower(e.Name)
+			local tabL = string.lower(e.Tab.Name)
+			local kindL = string.lower(e.Kind or "")
+			local total = 0
+			for _, tk in ipairs(tokens) do
+				local s = string.find(nameL, tk, 1, true)
+				if s then
+					local base = 60
+					if s == 1 then
+						base = 100
+					elseif string.sub(nameL, s - 1, s - 1) == " " then
+						base = 80
+					end
+					total = total + base - math.min(s, 20)
+				elseif string.find(tabL, tk, 1, true) then
+					total = total + 25
+				elseif string.find(kindL, tk, 1, true) then
+					total = total + 15
+				else
+					return nil
+				end
+			end
+			if nameL == table.concat(tokens, " ") then
+				total = total + 100
+			end
+			if e.IsTab then
+				total = total + 10
+			end
+			return total
+		end
+
+		local function highlightText(name, tokens)
+			local lower = string.lower(name)
+			local ranges = {}
+			for _, tk in ipairs(tokens) do
+				local s, e = string.find(lower, tk, 1, true)
+				if s then
+					table.insert(ranges, {s, e})
+				end
+			end
+			if #ranges == 0 then
+				return esc(name)
+			end
+			table.sort(ranges, function(a, b)
+				return a[1] < b[1]
+			end)
+			local merged = {ranges[1]}
+			for i = 2, #ranges do
+				local last = merged[#merged]
+				if ranges[i][1] <= last[2] + 1 then
+					last[2] = math.max(last[2], ranges[i][2])
+				else
+					table.insert(merged, ranges[i])
+				end
+			end
+			local hex = Theme.Accent:ToHex()
+			local out, pos = {}, 1
+			for _, r in ipairs(merged) do
+				if r[1] > pos then
+					table.insert(out, esc(string.sub(name, pos, r[1] - 1)))
+				end
+				table.insert(out, '<font color="#' .. hex .. '"><b>' .. esc(string.sub(name, r[1], r[2])) .. "</b></font>")
+				pos = r[2] + 1
+			end
+			if pos <= #name then
+				table.insert(out, esc(string.sub(name, pos)))
+			end
+			return table.concat(out)
+		end
+
+		local function makeResult(entry, order, animate, delay)
+			local item = new("CanvasGroup", {
+				Name = "Result",
+				Size = UDim2.new(1, 0, 0, 46),
+				BackgroundColor3 = Theme.Card,
+				BackgroundTransparency = 0.12,
+				BorderSizePixel = 0,
+				GroupTransparency = animate and 1 or 0,
+				LayoutOrder = order,
+				ZIndex = 3,
+				Parent = results,
+			})
+			corner(item, 12)
+			local ring = stroke(item, Theme.Stroke, 1, 0.2)
+			local pop = new("UIScale", {Scale = animate and 0.95 or 1, Parent = item})
+			bindTheme(item, function(T)
+				item.BackgroundColor3 = T.Card
+				ring.Color = T.Stroke
+			end)
+
+			local tile = new("Frame", {
+				Position = UDim2.fromOffset(9, 8),
+				Size = UDim2.fromOffset(30, 30),
+				BackgroundColor3 = Theme.Accent,
+				BackgroundTransparency = 0.86,
+				BorderSizePixel = 0,
+				ZIndex = 4,
+				Parent = item,
+			})
+			corner(tile, 9)
+			local tileRing = stroke(tile, Theme.Accent, 1, 0.7)
+			bindTheme(tile, function(T)
+				tile.BackgroundColor3 = T.Accent
+				tileRing.Color = T.Accent
+			end)
+			createIcon(safeIcon(entry.Icon, KIND_ICON[entry.Kind or ""] or "sparkles"), tile, 16, "Accent", {
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				Position = UDim2.fromScale(0.5, 0.5),
+				ZIndex = 5,
+			})
+			new("TextLabel", {
+				Position = UDim2.fromOffset(50, 6),
+				Size = UDim2.new(1, -90, 0, 18),
+				BackgroundTransparency = 1,
+				RichText = true,
+				Text = highlightText(entry.Name, lastTokens),
+				Font = Enum.Font.GothamMedium,
+				TextSize = 13,
+				TextColor3 = Theme.Text,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+				ZIndex = 4,
+				Parent = item,
+			})
+			local sub = new("TextLabel", {
+				Position = UDim2.fromOffset(50, 25),
+				Size = UDim2.new(1, -90, 0, 14),
+				BackgroundTransparency = 1,
+				Text = entry.IsTab and "Tab" or (entry.Tab.Name .. " / " .. (entry.Kind or "Option")),
+				Font = Enum.Font.Gotham,
+				TextSize = 11,
+				TextColor3 = Theme.Muted,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+				ZIndex = 4,
+				Parent = item,
+			})
+			bindTheme(sub, function(T)
+				sub.TextColor3 = T.Muted
+			end)
+			createIcon("chevron-right", item, 14, "Accent", {
+				AnchorPoint = Vector2.new(1, 0.5),
+				Position = UDim2.new(1, -12, 0.5, 0),
+				ZIndex = 4,
+			})
+			local hit = new("TextButton", {
+				Size = UDim2.fromScale(1, 1),
+				BackgroundTransparency = 1,
+				AutoButtonColor = false,
+				Text = "",
+				ZIndex = 8,
+				Parent = item,
+			})
+			hit.MouseEnter:Connect(function()
+				tween(item, 0.25, {BackgroundColor3 = Theme.CardHover}, ES.Quad)
+				tween(ring, 0.25, {Color = Theme.Accent, Transparency = 0.35}, ES.Quad)
+			end)
+			hit.MouseLeave:Connect(function()
+				tween(item, 0.35, {BackgroundColor3 = Theme.Card}, ES.Quad)
+				tween(ring, 0.35, {Color = Theme.Stroke, Transparency = 0.2}, ES.Quad)
+				tween(pop, 0.3, {Scale = 1}, ES.Back)
+			end)
+			hit.InputBegan:Connect(function(input)
+				if isPress(input) then
+					tween(pop, 0.1, {Scale = 0.97}, ES.Quad)
+				end
+			end)
+			hit.InputEnded:Connect(function(input)
+				if isPress(input) then
+					tween(pop, 0.4, {Scale = 1}, ES.Back)
+				end
+			end)
+			hit.MouseButton1Click:Connect(function()
+				go(entry)
+			end)
+			if animate then
+				tween(item, 0.35, {GroupTransparency = 0}, ES.Quad, ED.Out, delay or 0)
+				tween(pop, 0.5, {Scale = 1}, ES.Back, ED.Out, delay or 0)
+			end
+		end
+
+		local function refresh(animate)
+			local trimmed = (box.Text:gsub("^%s+", ""):gsub("%s+$", ""))
+			local tokens = {}
+			for word in string.gmatch(string.lower(trimmed), "%S+") do
+				table.insert(tokens, word)
+			end
+			lastTokens = tokens
+			for _, child in ipairs(results:GetChildren()) do
+				if child:IsA("CanvasGroup") then
+					child:Destroy()
+				end
+			end
+			local list = {}
+			for _, e in ipairs(collect()) do
+				if not (filterTab and (e.IsTab or e.Tab ~= filterTab)) then
+					local sc = 0
+					if #tokens > 0 then
+						sc = scoreEntry(e, tokens)
+					end
+					if sc then
+						table.insert(list, {e = e, score = sc, key = e.Tab.index * 10000 + (e.IsTab and 0 or e.Order)})
+					end
+				end
+			end
+			table.sort(list, function(a, b)
+				if a.score ~= b.score then
+					return a.score > b.score
+				end
+				return a.key < b.key
+			end)
+			shown = {}
+			for i = 1, math.min(#list, 50) do
+				shown[i] = list[i].e
+				makeResult(list[i].e, i, animate and i <= 10, (i - 1) * 0.03)
+			end
+			countLabel.Text = #list > 0 and tostring(#list) or ""
+			empty.Visible = #list == 0
+			if #list == 0 then
+				emptyTitle.Text = (#tokens > 0) and ('No results for "' .. trimmed .. '"') or "Nothing to search yet"
+			end
+			results.CanvasPosition = Vector2.new(0, 0)
+		end
+
+		local function paintChip(ref, selected)
+			tween(ref.btn, 0.2, {
+				BackgroundTransparency = selected and 0.78 or 1,
+				TextColor3 = selected and Theme.Text or Theme.Muted,
+			}, ES.Quad)
+			tween(ref.ring, 0.2, {Transparency = selected and 0.3 or 0.75}, ES.Quad)
+		end
+
+		local function buildChips()
+			for _, ref in ipairs(chipRefs) do
+				ref.btn:Destroy()
+			end
+			chipRefs = {}
+			local function addChip(label, tabRef, order)
+				local btn = new("TextButton", {
+					Size = UDim2.fromOffset(0, 26),
+					AutomaticSize = Enum.AutomaticSize.X,
+					BackgroundColor3 = Theme.Accent,
+					BackgroundTransparency = 1,
+					BorderSizePixel = 0,
+					AutoButtonColor = false,
+					Text = label,
+					Font = Enum.Font.GothamMedium,
+					TextSize = 12,
+					TextColor3 = Theme.Muted,
+					LayoutOrder = order,
+					ZIndex = 3,
+					Parent = chipRow,
+				})
+				round(btn)
+				new("UIPadding", {
+					PaddingLeft = UDim.new(0, 12),
+					PaddingRight = UDim.new(0, 12),
+					Parent = btn,
+				})
+				local ring = stroke(btn, Theme.Accent, 1, 0.75)
+				bindTheme(btn, function(T)
+					btn.BackgroundColor3 = T.Accent
+					ring.Color = T.Accent
+				end)
+				local ref = {btn = btn, ring = ring, tab = tabRef}
+				table.insert(chipRefs, ref)
+				btn.MouseButton1Click:Connect(function()
+					W.Click()
+					filterTab = tabRef
+					for _, r in ipairs(chipRefs) do
+						paintChip(r, r.tab == filterTab)
+					end
+					refresh(true)
+				end)
+				paintChip(ref, tabRef == filterTab)
+			end
+			addChip("All", nil, 0)
+			for i, t in ipairs(tabs) do
+				addChip(t.Name, t, i)
+			end
+			chipRow.CanvasPosition = Vector2.new(0, 0)
+		end
+
+		local function setSearch(open, instant)
+			if open == searchOpen then
+				return
+			end
+			searchOpen = open
+			searchTok = searchTok + 1
+			local tok = searchTok
+			searchBtn.active = open
+			searchBtn.paint()
+			if open then
+				filterTab = nil
+				box.Text = ""
+				buildChips()
+				refresh(true)
+				sheet.Visible = true
+				sheet.GroupTransparency = 1
+				body.Position = UDim2.fromOffset(12, 16)
+				tween(sheet, 0.25, {GroupTransparency = 0}, ES.Quad, ED.Out)
+				tween(body, 0.5, {Position = UDim2.fromOffset(12, 0)}, ES.Quint, ED.Out)
+				task.delay(0.3, function()
+					if searchTok == tok and searchOpen and W.Alive then
+						box:CaptureFocus()
+					end
+				end)
+			else
+				box:ReleaseFocus()
+				if instant then
+					sheet.GroupTransparency = 1
+					sheet.Visible = false
+				else
+					tween(sheet, 0.18, {GroupTransparency = 1}, ES.Quad, ED.In)
+					tween(body, 0.2, {Position = UDim2.fromOffset(12, 10)}, ES.Quad, ED.In)
+					task.delay(0.22, function()
+						if searchTok == tok and not searchOpen then
+							sheet.Visible = false
+						end
+					end)
+				end
+			end
+		end
+
+		go = function(entry)
+			W.Click()
+			setSearch(false)
+			local tab = entry.Tab
+			if entry.Foldout and entry.Foldout.Get and not entry.Foldout:Get() then
+				entry.Foldout:Set(true)
+			end
+			local same = (currentTab == tab)
+			selectTab(tab)
+			if entry.IsTab then
+				return
+			end
+			task.delay(same and 0.15 or 0.55, function()
+				if not W.Alive or W.CurrentTab ~= tab then
+					return
+				end
+				local slot, scroll = entry.Slot, tab.scroll
+				if not (slot and slot.Parent and slot.Visible and scroll) then
+					return
+				end
+				local s = math.max(W._shellScale.Scale, 0.01)
+				local y = (slot.AbsolutePosition.Y - scroll.AbsolutePosition.Y) / s + scroll.CanvasPosition.Y - 6
+				tween(scroll, 0.55, {CanvasPosition = Vector2.new(0, math.max(0, y))}, ES.Quint, ED.Out)
+				local c = entry.C
+				if c then
+					task.delay(0.3, function()
+						if c.sweep then
+							c.sweep()
+						end
+					end)
+					for i = 0, 2 do
+						task.delay(0.3 + i * 0.4, function()
+							if c.flash then
+								c.flash()
+							end
+						end)
+					end
+					local st = c.stroke
+					if st and st.Parent then
+						tween(st, 0.25, {Color = Theme.Accent, Transparency = 0, Thickness = 2}, ES.Quad)
+						task.delay(1.5, function()
+							if st.Parent then
+								tween(st, 0.5, {Color = Theme.Stroke, Transparency = 0.2, Thickness = 1}, ES.Quad)
+							end
+						end)
+					end
+				end
+			end)
+		end
+
+		------------------------------------------------------------------
+		-- wiring
+		------------------------------------------------------------------
+		box.Focused:Connect(function()
+			tween(barRing, 0.25, {Transparency = 0.05}, ES.Quad)
+		end)
+		box.FocusLost:Connect(function(enter)
+			tween(barRing, 0.3, {Transparency = 0.6}, ES.Quad)
+			if enter and searchOpen and UserInputService.KeyboardEnabled and shown[1] then
+				go(shown[1])
+			end
+		end)
+		box:GetPropertyChangedSignal("Text"):Connect(function()
+			refresh(false)
+		end)
+		clearBtn.MouseButton1Click:Connect(function()
+			W.Click()
+			if box.Text ~= "" then
+				box.Text = ""
+				box:CaptureFocus()
+			else
+				setSearch(false)
+			end
+		end)
+		searchBtn.Button.MouseButton1Click:Connect(function()
+			W.Click()
+			setSearch(not searchOpen)
+		end)
+		gearBtn.Button.MouseButton1Click:Connect(function()
+			W.Click()
+			if searchOpen then
+				setSearch(false)
+			end
+			if W.SettingsTab then
+				selectTab(W.SettingsTab)
+			else
+				W:Notify({Title = "Settings", Content = "This window has no Settings tab.", Type = "warn", Duration = 2.5})
+			end
+		end)
+		W:_connect(UserInputService.InputBegan, function(input)
+			if searchOpen and input.KeyCode == Enum.KeyCode.Escape then
+				setSearch(false)
+			end
+		end)
+		W._onTabChanged = function(tab)
+			gearBtn.active = (tab == W.SettingsTab)
+			gearBtn.paint()
+		end
+		W._closeSearch = function(instant)
+			if searchOpen then
+				setSearch(false, instant)
+			end
+		end
+		function W:OpenSearch()
+			setSearch(true)
+		end
+		function W:CloseSearch()
+			setSearch(false)
+		end
+		function W:ToggleSearch()
+			setSearch(not searchOpen)
+		end
+	end)()
 	function W:_reveal()
 		if not W.Alive or W.Ready then
 			return
@@ -4065,6 +4801,19 @@ function Tab:_card(height, name, o)
 	corner(card, 12)
 	local st = stroke(card, Theme.Stroke, 1, 0.2)
 	c.slot, c.card, c.stroke = slot, card, st
+	if name and tostring(name) ~= "" then
+		W._search = W._search or {}
+		c.entry = {
+			Name = tostring(name),
+			Tab = self,
+			Slot = slot,
+			C = c,
+			Icon = o.Icon,
+			Foldout = self._foldoutObj,
+			Order = #W._search + 1,
+		}
+		table.insert(W._search, c.entry)
+	end
 	if self.capture then
 		table.insert(self.capture, {slot = slot, frame = card})
 	end
@@ -4334,6 +5083,9 @@ function Tab:Button(o)
 	local W = self.Window
 	o = o or {}
 	local c = self:_card(40, o.Name, {Icon = o.Icon})
+	if c.entry then
+		c.entry.Kind = "Button"
+	end
 	local arrow = new("TextLabel", {
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, -14, 0.5, 0),
@@ -4383,6 +5135,9 @@ function Tab:Toggle(o)
 	local W = self.Window
 	o = o or {}
 	local c = self:_card(40, o.Name, {silent = true, Icon = o.Icon})
+	if c.entry then
+		c.entry.Kind = "Toggle"
+	end
 	local on = o.Default and true or false
 	local track = new("Frame", {
 		AnchorPoint = Vector2.new(1, 0.5),
@@ -4476,6 +5231,9 @@ function Tab:Slider(o)
 	local step = o.Step or o.Increment or 1
 	local suffix = o.Suffix or ""
 	local c = self:_card(58, o.Name, {silent = true, Icon = o.Icon})
+	if c.entry then
+		c.entry.Kind = "Slider"
+	end
 	c.title.Size = UDim2.new(1, -100 - c.iconShift, 0, 32)
 	local box = new("TextBox", {
 		AnchorPoint = Vector2.new(1, 0),
@@ -4659,6 +5417,9 @@ function Tab:Dropdown(o)
 	local multi = o.Multi and true or false
 	local HEAD = 40
 	local c = self:_card(HEAD, o.Name, {hitHeight = HEAD, clip = true, Icon = o.Icon})
+	if c.entry then
+		c.entry.Kind = "Dropdown"
+	end
 	c.title.Size = UDim2.new(0.5, -14 - c.iconShift, 0, HEAD)
 	local selected = {}
 	local current = nil
@@ -4904,6 +5665,9 @@ function Tab:Input(o)
 	local W = self.Window
 	o = o or {}
 	local c = self:_card(40, o.Name, {silent = true, Icon = o.Icon})
+	if c.entry then
+		c.entry.Kind = "Input"
+	end
 	c.title.Size = UDim2.new(0.48, -14 - c.iconShift, 1, 0)
 	c.hit.Size = UDim2.new(0.5, 0, 1, 0)
 	local box = new("TextBox", {
@@ -4981,6 +5745,9 @@ function Tab:Keybind(o)
 	o = o or {}
 	local key = o.Default or Enum.KeyCode.F
 	local c = self:_card(40, o.Name, {silent = true, Icon = o.Icon})
+	if c.entry then
+		c.entry.Kind = "Keybind"
+	end
 	local btn = new("TextButton", {
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, -10, 0.5, 0),
@@ -5083,6 +5850,9 @@ function Tab:ColorPicker(o)
 	local h, s, v = color:ToHSV()
 	local HEAD, BODY = 40, 124
 	local c = self:_card(HEAD, o.Name, {hitHeight = HEAD, clip = true, Icon = o.Icon})
+	if c.entry then
+		c.entry.Kind = "Color"
+	end
 	local swatch = new("Frame", {
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, -12, 0, HEAD / 2),
@@ -5230,6 +6000,9 @@ function Tab:Foldout(o)
 	local W = self.Window
 	o = o or {}
 	local c = self:_card(40, o.Name, {Icon = o.Icon})
+	if c.entry then
+		c.entry.Kind = "Group"
+	end
 	local arrow = new("TextLabel", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.new(1, -20, 0.5, 0),
@@ -5247,9 +6020,12 @@ function Tab:Foldout(o)
 		arrow.TextColor3 = T.Accent
 	end)
 	local group = {}
+	local object = {}
 	self.capture = group
+	self._foldoutObj = object
 	W:_fire(o.Build, self)
 	self.capture = nil
+	self._foldoutObj = nil
 	local open = o.Open and true or false
 	local function apply(animate)
 		tween(arrow, 0.35, {Rotation = open and -90 or 90}, ES.Back, ED.Out)
@@ -5266,7 +6042,6 @@ function Tab:Foldout(o)
 		open = not open
 		apply(true)
 	end)
-	local object = {}
 	function object:Set(value)
 		open = value and true or false
 		apply(true)
@@ -5283,6 +6058,9 @@ function Tab:IconPicker(o)
 	local HEAD, GRID_H = 40, 138
 	local OPEN_H = HEAD + 38 + GRID_H + 26
 	local c = self:_card(HEAD, o.Name, {hitHeight = HEAD, clip = true, Icon = o.Icon})
+	if c.entry then
+		c.entry.Kind = "Icons"
+	end
 	c.title.Size = UDim2.new(0.45, -14 - c.iconShift, 0, HEAD)
 	local current = o.Default or ""
 	local object = {Name = o.Name}
@@ -5507,6 +6285,9 @@ function Tab:FontPicker(o)
 	local HEAD, LIST_H = 40, 150
 	local OPEN_H = HEAD + 38 + LIST_H + 26
 	local c = self:_card(HEAD, o.Name, {hitHeight = HEAD, clip = true, Icon = o.Icon})
+	if c.entry then
+		c.entry.Kind = "Font"
+	end
 	c.title.Size = UDim2.new(0.4, -14 - c.iconShift, 0, HEAD)
 	local current = o.Default or Library.FontName
 	local object = {Name = o.Name}
@@ -6022,6 +6803,7 @@ function Window:CreateSettingsTab(name, hide)
 		end
 	end
 	local tab = W:AddTab(name or "Settings", "settings")
+	W.SettingsTab = tab
 	local uiColor, introColor, introText, introSub, introImage, introSound, introDuration, introStyle, introPick
 	if not (H.UIColor and H.Preset and H.UIScale and H.UITransparency and H.IslandWidth and H.ToggleKey and H.TabPosition) then
 		tab:Section("Appearance")
