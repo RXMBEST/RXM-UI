@@ -1,6 +1,5 @@
 local function svc(name)
-	local service = game:GetService(name)
-	if cloneref then
+	local service = game
 		local ok, cloned = pcall(cloneref, service)
 		if ok and cloned then
 			return cloned
